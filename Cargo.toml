@@ -1,0 +1,10 @@
+[package]
+authors = ["jD91mZM2 <me@krake.one>"]
+name = "xidlehook"
+version = "0.1.0"
+[dependencies]
+clap = "2.29.2"
+
+[dependencies.x11]
+features = ["xlib", "xss"]
+version = "2.17.2"
