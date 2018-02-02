@@ -3,7 +3,7 @@ authors = ["jD91mZM2 <me@krake.one>"]
 description = "xautolock rewrite in Rust, with a few extra features"
 license-file = "LICENSE"
 name = "xidlehook"
-version = "0.1.0"
+version = "0.1.1"
 [dependencies]
 clap = "2.29.2"
 

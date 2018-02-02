@@ -110,25 +110,31 @@ fn main() {
         if notify.map(|notify| (idle + notify) >= time).unwrap_or(true) {
             if notify.is_some() && !ran_notify {
                 invoke(&notifier.unwrap());
+
                 ran_notify = true;
                 delay = Duration::from_secs(1);
+
+                // Since the delay is usually a minute, I could've exceeded both the notify and the timer.
+                // The simple solution is to change the timer to a point where it's guaranteed
+                // it's been _ seconds since the notifier.
                 time_new = idle + notify.unwrap();
-            } else if idle >= time_new {
-                if !ran_timer {
-                    invoke(&timer);
-                    ran_timer = true;
-                    delay = default_delay;
-                }
+            } else if idle >= time_new && !ran_timer {
+                invoke(&timer);
+
+                ran_timer = true;
+                delay = default_delay;
             }
         } else {
             if ran_notify && !ran_timer {
+                // In case the user goes back from being idle between the notify and timer
                 if let Some(canceller) = canceller {
                     invoke(&canceller);
                 }
             }
-            ran_timer  = false;
-            ran_notify = false;
             delay = Duration::from_secs(SCALE);
+            ran_notify = false;
+            ran_timer  = false;
+            time_new = time;
         }
 
         thread::sleep(delay);
@@ -150,7 +156,7 @@ fn invoke(cmd: &str) {
         Command::new("bash")
             .arg("-c")
             .arg(cmd)
-            .output() {
+            .status() {
         eprintln!("failed to invoke command: {}", err);
     }
 }
