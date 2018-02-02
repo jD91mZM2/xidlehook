@@ -31,3 +31,9 @@ xidlehook \
   --notifier  'xrandr --output "$(xrandr | grep primary | cut -d " " -f 1)" --brightness .1' \
   --canceller 'xrandr --output "$(xrandr | grep primary | cut -d " " -f 1)" --brightness 1'
 ```
+
+# Installation
+
+Clone and compile it yourself.
+
+[AUR package](https://aur.archlinux.org/packages/xidlehook/)
