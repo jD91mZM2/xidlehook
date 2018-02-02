@@ -26,7 +26,7 @@ Here's a lock using i3lock, with screen dim support.
 ```Bash
 xidlehook \
   --time 5 \
-  --timer "i3lock" \
+  --timer 'xrandr --output "$(xrandr | grep primary | cut -d " " -f 1)" --brightness 1; i3lock' \
   --notify 10 \
   --notifier  'xrandr --output "$(xrandr | grep primary | cut -d " " -f 1)" --brightness .1' \
   --canceller 'xrandr --output "$(xrandr | grep primary | cut -d " " -f 1)" --brightness 1'
