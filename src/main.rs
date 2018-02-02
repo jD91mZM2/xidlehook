@@ -73,8 +73,7 @@ fn main() {
 
     let display = unsafe { XOpenDisplay(ptr::null()) };
     if display.is_null() {
-        eprintln!("failed to open x server");
-        return;
+        panic!("failed to open x server");
     }
     let _cleanup = DeferXClose(display);
 
