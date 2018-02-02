@@ -7,7 +7,7 @@ use std::process::Command;
 use std::time::Duration;
 use std::{ptr, thread};
 use x11::xlib::{Display, XCloseDisplay, XDefaultRootWindow, XFree, XOpenDisplay};
-use x11::xss::{XScreenSaverAllocInfo, XScreenSaverQueryInfo};
+use x11::xss::{XScreenSaverAllocInfo, XScreenSaverInfo, XScreenSaverQueryInfo};
 
 struct DeferXClose(*mut Display);
 impl Drop for DeferXClose {
@@ -78,8 +78,11 @@ fn main() {
     }
     let _cleanup = DeferXClose(display);
 
+    let info = unsafe { XScreenSaverAllocInfo() };
+    let _cleanup = DeferXFree(info as *mut c_void);
+
     if matches.is_present("print") {
-        if let Ok(idle) = get_idle(display) {
+        if let Ok(idle) = get_idle(display, info) {
             println!("{}", idle);
         }
         return;
@@ -100,7 +103,7 @@ fn main() {
     let mut time_new = time;
 
     loop {
-        let idle = match get_idle(display) {
+        let idle = match get_idle(display, info) {
             Ok(idle) => idle,
             Err(_) => return
         };
@@ -140,10 +143,7 @@ fn main() {
         thread::sleep(delay);
     }
 }
-fn get_idle(display: *mut Display) -> Result<u64, ()> {
-    let info = unsafe { XScreenSaverAllocInfo() };
-    let _cleanup = DeferXFree(info as *mut c_void);
-
+fn get_idle(display: *mut Display, info: *mut XScreenSaverInfo) -> Result<u64, ()> {
     if unsafe { XScreenSaverQueryInfo(display, XDefaultRootWindow(display), info) } != 1 {
         eprintln!("failed to query screen saver info");
         return Err(());
