@@ -2,11 +2,13 @@
 extern crate x11;
 
 use clap::{App, Arg};
+use std::ffi::CString;
 use std::os::raw::c_void;
 use std::process::Command;
 use std::time::Duration;
 use std::{ptr, thread};
-use x11::xlib::{Display, XCloseDisplay, XDefaultRootWindow, XFree, XOpenDisplay};
+use x11::xlib::{Display, XA_ATOM, XCloseDisplay, XDefaultRootWindow, XFree, XGetInputFocus, XGetWindowProperty,
+                XInternAtom, XOpenDisplay};
 use x11::xss::{XScreenSaverAllocInfo, XScreenSaverInfo, XScreenSaverQueryInfo};
 
 struct DeferXClose(*mut Display);
@@ -36,6 +38,12 @@ fn do_main() -> bool {
             Arg::with_name("print")
                 .help("Prints the idle time to standard output. This is similar to xprintidle.")
                 .long("print")
+        )
+        .arg(
+            Arg::with_name("not-when-fullscreen")
+                .help("Don't call the timer when the current application is fullscreen. \
+                       Useful for preventing the lockscreen when watching videos")
+                .long("not-when-fullscreen")
         )
         .arg(
             Arg::with_name("time")
@@ -91,14 +99,17 @@ fn do_main() -> bool {
         return true;
     }
 
+    let not_when_fullscreen = matches.is_present("not-when-fullscreen");
     let time     = value_t_or_exit!(matches, "time", u32) as u64 * SCALE;
     let timer    = matches.value_of("timer").unwrap();
     let notify   = value_t!(matches, "notify", u32).ok().map(|notify| notify as u64);
     let notifier = matches.value_of("notifier");
     let canceller = matches.value_of("canceller");
 
-    let mut ran_timer  = false;
     let mut ran_notify = false;
+    let mut ran_timer  = false;
+
+    let mut fullscreen = None;
 
     let default_delay = Duration::from_secs(SCALE as u64);
     let mut delay = default_delay;
@@ -113,22 +124,68 @@ fn do_main() -> bool {
 
         let idle = idle / 1000; // Convert to seconds
 
-        if notify.map(|notify| (idle + notify) >= time).unwrap_or(true) {
-            if notify.is_some() && !ran_notify {
-                invoke(&notifier.unwrap());
+        if notify.map(|notify| (idle + notify) >= time).unwrap_or(idle >= time) {
+            if not_when_fullscreen && fullscreen.is_none() {
+                let mut focus = 0u64;
+                let mut revert = 0i32;
 
-                ran_notify = true;
-                delay = Duration::from_secs(1);
+                let mut actual_type = 0u64;
+                let mut actual_format = 0i32;
+                let mut nitems = 0u64;
+                let mut bytes = 0u64;
+                let mut data: *mut u8 = unsafe { std::mem::uninitialized() };
 
-                // Since the delay is usually a minute, I could've exceeded both the notify and the timer.
-                // The simple solution is to change the timer to a point where it's guaranteed
-                // it's been _ seconds since the notifier.
-                time_new = idle + notify.unwrap();
-            } else if idle >= time_new && !ran_timer {
-                invoke(&timer);
+                fullscreen = Some(unsafe {
+                    XGetInputFocus(display, &mut focus as *mut _, &mut revert as *mut _);
 
-                ran_timer = true;
-                delay = default_delay;
+                    let cstring = CString::from_vec_unchecked("_NET_WM_STATE".into());
+
+                    if XGetWindowProperty(
+                        display,
+                        focus,
+                        XInternAtom(display, cstring.as_ptr(), 0),
+                        0,
+                        !0,
+                        0,
+                        XA_ATOM,
+                        &mut actual_type,
+                        &mut actual_format,
+                        &mut nitems,
+                        &mut bytes,
+                        &mut data
+                    ) != 0 {
+                        eprintln!("failed to get window property");
+                        false
+                    } else {
+                        // Welcome to hell.
+                        // I spent waay to long trying to get `data` to work.
+                        // Currently it returns 75, because it overflows 331 to fit into a byte.
+                        // Changing `data` to a *mut u64 gives me 210453397504.
+                        // I have no idea why, and at this point I don't want to know.
+                        // So here I'll just compare it to 75 and assume fullscreen.
+
+                        let cstring = CString::from_vec_unchecked("_NET_WM_STATE_FULLSCREEN".into());
+                        *data == (XInternAtom(display, cstring.as_ptr(), 0) & 0xFF) as u8
+                    }
+                });
+            }
+            if !not_when_fullscreen || !fullscreen.unwrap() {
+                if notify.is_some() && !ran_notify {
+                    invoke(&notifier.unwrap());
+
+                    ran_notify = true;
+                    delay = Duration::from_secs(1);
+
+                    // Since the delay is usually a minute, I could've exceeded both the notify and the timer.
+                    // The simple solution is to change the timer to a point where it's guaranteed
+                    // it's been _ seconds since the notifier.
+                    time_new = idle + notify.unwrap();
+                } else if idle >= time_new && !ran_timer {
+                    invoke(&timer);
+
+                    ran_timer = true;
+                    delay = default_delay;
+                }
             }
         } else {
             if ran_notify && !ran_timer {
@@ -137,17 +194,17 @@ fn do_main() -> bool {
                     invoke(&canceller);
                 }
             }
-            delay = Duration::from_secs(SCALE);
+            delay = default_delay;
             ran_notify = false;
             ran_timer  = false;
-            time_new = time;
+            fullscreen = None;
         }
 
         thread::sleep(delay);
     }
 }
 fn get_idle(display: *mut Display, info: *mut XScreenSaverInfo) -> Result<u64, ()> {
-    if unsafe { XScreenSaverQueryInfo(display, XDefaultRootWindow(display), info) } != 1 {
+    if unsafe { XScreenSaverQueryInfo(display, XDefaultRootWindow(display), info) } == 0 {
         eprintln!("failed to query screen saver info");
         return Err(());
     }
