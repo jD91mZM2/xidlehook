@@ -33,7 +33,8 @@ xidlehook \
   --timer 'xrandr --output "$(xrandr | grep primary | cut -d " " -f 1)" --brightness 1; i3lock' \
   --notify 10 \
   --notifier  'xrandr --output "$(xrandr | grep primary | cut -d " " -f 1)" --brightness .1' \
-  --canceller 'xrandr --output "$(xrandr | grep primary | cut -d " " -f 1)" --brightness 1'
+  --canceller 'xrandr --output "$(xrandr | grep primary | cut -d " " -f 1)" --brightness 1' \
+  --not-when-fullscreen
 ```
 
 Note: Every command is passed through `sh -c`, so you should be able to mostly use normal syntax.

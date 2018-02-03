@@ -164,8 +164,19 @@ fn do_main() -> bool {
                         // I have no idea why, and at this point I don't want to know.
                         // So here I'll just compare it to 75 and assume fullscreen.
 
-                        let cstring = CString::from_vec_unchecked("_NET_WM_STATE_FULLSCREEN".into());
-                        *data == (XInternAtom(display, cstring.as_ptr(), 0) & 0xFF) as u8
+                        let mut fullscreen = false;
+
+                        for i in 0..nitems as isize {
+                            let cstring = CString::from_vec_unchecked("_NET_WM_STATE_FULLSCREEN".into());
+                            if *data.offset(i) == (XInternAtom(display, cstring.as_ptr(), 0) & 0xFF) as u8 {
+                                fullscreen = true;
+                                break;
+                            }
+                        }
+
+                        XFree(data as *mut c_void);
+
+                        fullscreen
                     }
                 });
             }
