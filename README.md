@@ -40,6 +40,20 @@ Note: Every command is passed through `sh -c`, so you should be able to mostly u
 
 # Installation
 
-Clone and compile it yourself.
+Installation using `cargo`:
+
+```
+cargo install xidlehook
+```
+
+Or if you're on Arch Linux and prefer using the AUR:
 
 [AUR package](https://aur.archlinux.org/packages/xidlehook/)
+
+Or if you want to clone it:
+
+```
+git clone https://github.com/jD91mZM2/xidlehook
+cd xidlehook
+cargo build --release
+```
