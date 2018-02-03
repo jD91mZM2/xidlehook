@@ -32,6 +32,8 @@ xidlehook \
   --canceller 'xrandr --output "$(xrandr | grep primary | cut -d " " -f 1)" --brightness 1'
 ```
 
+Note: Every command is passed through `sh -c`, so you should be able to mostly use normal syntax.
+
 # Installation
 
 Clone and compile it yourself.

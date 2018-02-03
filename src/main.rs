@@ -156,7 +156,7 @@ fn get_idle(display: *mut Display, info: *mut XScreenSaverInfo) -> Result<u64, (
 }
 fn invoke(cmd: &str) {
     if let Err(err) =
-        Command::new("bash")
+        Command::new("sh")
             .arg("-c")
             .arg(cmd)
             .status() {
