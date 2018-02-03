@@ -25,6 +25,10 @@ impl Drop for DeferXFree {
 const SCALE: u64 = 60; // Second:minute scale. Can be changed for debugging purposes.
 
 fn main() {
+    let success = do_main();
+    std::process::exit(if success { 0 } else { 1 });
+}
+fn do_main() -> bool {
     let matches = App::new(crate_name!())
         .author(crate_authors!())
         .version(crate_version!())
@@ -38,14 +42,13 @@ fn main() {
                 .help("Sets the required amount of idle minutes before executing command")
                 .long("time")
                 .required_unless("print")
-                .requires("timer")
                 .takes_value(true)
         )
         .arg(
             Arg::with_name("timer")
                 .help("Sets command to run when timer goes off")
                 .long("timer")
-                .requires("time")
+                .required_unless("print")
                 .takes_value(true)
         )
         .arg(
@@ -74,7 +77,7 @@ fn main() {
     let display = unsafe { XOpenDisplay(ptr::null()) };
     if display.is_null() {
         eprintln!("failed to open x server");
-        return;
+        return false;
     }
     let _cleanup = DeferXClose(display);
 
@@ -85,7 +88,7 @@ fn main() {
         if let Ok(idle) = get_idle(display, info) {
             println!("{}", idle);
         }
-        return;
+        return true;
     }
 
     let time     = value_t_or_exit!(matches, "time", u32) as u64 * SCALE;
@@ -105,7 +108,7 @@ fn main() {
     loop {
         let idle = match get_idle(display, info) {
             Ok(idle) => idle,
-            Err(_) => return
+            Err(_) => return false
         };
 
         let idle = idle / 1000; // Convert to seconds
