@@ -39,7 +39,7 @@ impl Drop for DeferXFree {
     }
 }
 
-const SCALE: u64 = 1; // Second:minute scale. Can be changed for debugging purposes.
+const SCALE: u64 = 60; // Second:minute scale. Can be changed for debugging purposes.
 
 #[cfg(feature = "tokio")] const COMMAND_DEACTIVATE: u8 = 0;
 #[cfg(feature = "tokio")] const COMMAND_ACTIVATE:   u8 = 1;
