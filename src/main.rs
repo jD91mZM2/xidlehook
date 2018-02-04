@@ -11,6 +11,7 @@ extern crate x11;
 #[cfg(feature = "tokio")] use futures::{Future, Sink, Stream};
 #[cfg(feature = "tokio")] use std::cell::RefCell;
 #[cfg(feature = "tokio")] use std::fs;
+#[cfg(feature = "tokio")] use std::io::ErrorKind;
 #[cfg(feature = "tokio")] use std::rc::Rc;
 #[cfg(feature = "tokio")] use tokio_core::reactor::{Core, Timeout};
 #[cfg(feature = "tokio")] use tokio_io::io;
@@ -199,7 +200,11 @@ fn do_main() -> bool {
                     handle_clone.spawn(future::loop_fn(conn, move |conn| {
                         let app = Rc::clone(&app);
                         io::read_exact(conn, [0; 1])
-                            .map_err(|err| eprintln!("io error: {}", err))
+                            .map_err(|err| {
+                                if err.kind() != ErrorKind::UnexpectedEof {
+                                    eprintln!("io error: {}", err);
+                                }
+                            })
                             .and_then(move |(conn, buf)| {
                                 match buf[0] {
                                     COMMAND_ACTIVATE   => app.borrow_mut().active = true,
