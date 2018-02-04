@@ -9,6 +9,30 @@ version = "0.2.1"
 [dependencies]
 clap = "2.29.2"
 
+[dependencies.ctrlc]
+optional = true
+version = "3.1.0"
+
+[dependencies.futures]
+optional = true
+version = "0.1.18"
+
+[dependencies.tokio-core]
+optional = true
+version = "0.1.12"
+
+[dependencies.tokio-io]
+optional = true
+version = "0.1.4"
+
+[dependencies.tokio-uds]
+optional = true
+version = "0.1.7"
+
 [dependencies.x11]
 features = ["xlib", "xss"]
 version = "2.17.2"
+
+[features]
+default = ["tokio"]
+tokio = ["ctrlc", "futures", "tokio-core", "tokio-io", "tokio-uds"]

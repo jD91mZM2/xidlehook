@@ -12,6 +12,7 @@ It basically just executes a command when the computer has been idle for \_ minu
 Improvments over xautolock:
  - As well as a notifier, there is now a canceller, for when the user stops it from locking.
  - Not specific to locking. Multiple instances can run at the same time.
+ - Optional communication using unix sockets to allow activating and deactivating it.
  - Optionally prevent locking when an application is fullscreen.
 
 Missing features:
@@ -19,9 +20,6 @@ Missing features:
  - Killer stuff
  - Bell, because you should be using --notify
  - All the instance related stuff (-activate, -restart, -exit, etc)
-
-Planned features:
- - Optional communication using unix sockets to allow activating and deactivating it.
 
 # Example
 
@@ -58,3 +56,22 @@ git clone https://github.com/jD91mZM2/xidlehook
 cd xidlehook
 cargo build --release
 ```
+
+## Too bloaty?
+
+Does this application have too many dependencies for your taste?  
+You can disable a few with `--no-default-features`.
+
+# Socket API
+
+The socket API is very simple. Each packet is a single byte.
+
+**Note**: The socket API requires the "tokio" feature.
+
+|------|---------------------------|
+| Byte | Command                   |
+|------|---------------------------|
+| 0x0  | Deactivate                |
+| 0x1  | Activate                  |
+| 0x2  | Trigger the timer command |
+|------|---------------------------|

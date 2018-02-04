@@ -1,12 +1,27 @@
 #[macro_use] extern crate clap;
+#[cfg(feature = "tokio")] extern crate ctrlc;
+#[cfg(feature = "tokio")] extern crate futures;
+#[cfg(feature = "tokio")] extern crate tokio_core;
+#[cfg(feature = "tokio")] extern crate tokio_io;
+#[cfg(feature = "tokio")] extern crate tokio_uds;
 extern crate x11;
 
-use clap::{App, Arg};
+#[cfg(feature = "tokio")] use futures::future::{self, Loop};
+#[cfg(feature = "tokio")] use futures::sync::mpsc;
+#[cfg(feature = "tokio")] use futures::{Future, Sink, Stream};
+#[cfg(feature = "tokio")] use std::cell::RefCell;
+#[cfg(feature = "tokio")] use std::fs;
+#[cfg(feature = "tokio")] use std::rc::Rc;
+#[cfg(feature = "tokio")] use tokio_core::reactor::{Core, Timeout};
+#[cfg(feature = "tokio")] use tokio_io::io;
+#[cfg(feature = "tokio")] use tokio_uds::UnixListener;
+#[cfg(not(feature = "tokio"))] use std::thread;
+use clap::{App as ClapApp, Arg};
 use std::ffi::CString;
 use std::os::raw::c_void;
 use std::process::Command;
+use std::ptr;
 use std::time::Duration;
-use std::{ptr, thread};
 use x11::xlib::{Display, XA_ATOM, XCloseDisplay, XDefaultRootWindow, XFree, XGetInputFocus, XGetWindowProperty,
                 XInternAtom, XOpenDisplay};
 use x11::xss::{XScreenSaverAllocInfo, XScreenSaverInfo, XScreenSaverQueryInfo};
@@ -24,14 +39,18 @@ impl Drop for DeferXFree {
     }
 }
 
-const SCALE: u64 = 60; // Second:minute scale. Can be changed for debugging purposes.
+const SCALE: u64 = 1; // Second:minute scale. Can be changed for debugging purposes.
+
+#[cfg(feature = "tokio")] const COMMAND_DEACTIVATE: u8 = 0;
+#[cfg(feature = "tokio")] const COMMAND_ACTIVATE:   u8 = 1;
+#[cfg(feature = "tokio")] const COMMAND_TRIGGER:    u8 = 2;
 
 fn main() {
     let success = do_main();
     std::process::exit(if success { 0 } else { 1 });
 }
 fn do_main() -> bool {
-    let matches = App::new(crate_name!())
+    let clap_app = ClapApp::new(crate_name!())
         .author(crate_authors!())
         .version(crate_version!())
         .arg(
@@ -79,8 +98,16 @@ fn do_main() -> bool {
                 .long("canceller")
                 .requires("notify")
                 .takes_value(true)
-        )
-        .get_matches();
+        );
+    #[cfg(feature = "tokio")]
+    let clap_app = clap_app
+        .arg(
+            Arg::with_name("socket")
+                .help("Listens to events over a unix socket")
+                .long("socket")
+                .takes_value(true)
+        );
+    let matches = clap_app.get_matches();
 
     let display = unsafe { XOpenDisplay(ptr::null()) };
     if display.is_null() {
@@ -99,33 +126,158 @@ fn do_main() -> bool {
         return true;
     }
 
-    let not_when_fullscreen = matches.is_present("not-when-fullscreen");
-    let time     = value_t_or_exit!(matches, "time", u32) as u64 * SCALE;
-    let timer    = matches.value_of("timer").unwrap();
-    let notify   = value_t!(matches, "notify", u32).ok().map(|notify| notify as u64);
-    let notifier = matches.value_of("notifier");
-    let canceller = matches.value_of("canceller");
+    let time = value_t_or_exit!(matches, "time", u32) as u64 * SCALE;
+    let app = App {
+        active: true,
+        delay: Duration::from_secs(SCALE),
 
-    let mut ran_notify = false;
-    let mut ran_timer  = false;
+        display: display,
+        info: info,
 
-    let mut fullscreen = None;
+        not_when_fullscreen: matches.is_present("not-when-fullscreen"),
+        time: time,
+        timer: matches.value_of("timer").unwrap().to_string(),
+        notify: value_t!(matches, "notify", u32).ok().map(|notify| notify as u64),
+        notifier: matches.value_of("notifier").map(String::from),
+        canceller: matches.value_of("canceller").map(String::from),
 
-    let default_delay = Duration::from_secs(SCALE as u64);
-    let mut delay = default_delay;
+        ran_notify: false,
+        ran_timer:  false,
 
-    let mut time_new = time;
+        fullscreen: None,
 
-    loop {
-        let idle = match get_idle(display, info) {
-            Ok(idle) => idle,
-            Err(_) => return false
-        };
+        time_new: time
+    };
 
-        let idle = idle / 1000; // Convert to seconds
+    #[cfg(not(feature = "tokio"))]
+    {
+        let mut app = app;
+        loop {
+            if !app.step() {
+                return false;
+            }
 
-        if notify.map(|notify| (idle + notify) >= time).unwrap_or(idle >= time) {
-            if not_when_fullscreen && fullscreen.is_none() {
+            thread::sleep(app.delay);
+        }
+    }
+    #[cfg(feature = "tokio")]
+    {
+        let socket = matches.value_of("socket");
+        let app = Rc::new(RefCell::new(app));
+
+        let mut core = Core::new().unwrap();
+        let handle = Rc::new(core.handle());
+
+        let (tx_ctrlc, rx_ctrlc) = mpsc::channel(1);
+        let tx_ctrlc = RefCell::new(Some(tx_ctrlc));
+
+        if let Err(err) =
+            ctrlc::set_handler(move || {
+                if let Some(tx_ctrlc) = tx_ctrlc.borrow_mut().take() {
+                    tx_ctrlc.send(()).wait().unwrap();
+                }
+            }) {
+            eprintln!("failed to create signal handler: {}", err);
+        }
+
+        if let Some(socket) = socket {
+            let listener = match UnixListener::bind(socket, &handle) {
+                Ok(listener) => listener,
+                Err(err) => {
+                    eprintln!("failed to bind unix socket: {}", err);
+                    return false;
+                }
+            };
+
+            let app = Rc::clone(&app);
+            let handle_clone = Rc::clone(&handle);
+
+            handle.spawn(listener.incoming()
+                .map_err(|err| eprintln!("listener error: {}", err))
+                .for_each(move |(conn, _)| {
+                    let app = Rc::clone(&app);
+                    handle_clone.spawn(future::loop_fn(conn, move |conn| {
+                        let app = Rc::clone(&app);
+                        io::read_exact(conn, [0; 1])
+                            .map_err(|err| eprintln!("io error: {}", err))
+                            .and_then(move |(conn, buf)| {
+                                match buf[0] {
+                                    COMMAND_ACTIVATE   => app.borrow_mut().active = true,
+                                    COMMAND_DEACTIVATE => app.borrow_mut().active = false,
+                                    COMMAND_TRIGGER    => app.borrow().trigger(),
+                                    x => eprintln!("unix socket: invalid command: {}", x)
+                                }
+                                Ok(Loop::Continue(conn))
+                            })
+                    }));
+                    Ok(())
+                }))
+        }
+
+        let handle_clone = Rc::clone(&handle);
+
+        handle.spawn(future::loop_fn((), move |()| {
+            let app = Rc::clone(&app);
+            let delay = app.borrow().delay;
+            Timeout::new(delay, &handle_clone)
+                .unwrap()
+                .map_err(|_| ())
+                .and_then(move |_| {
+                    if app.borrow_mut().step() {
+                        Ok(Loop::Continue(()))
+                    } else {
+                        Err(())
+                    }
+                })
+        }));
+
+        let status = core.run(rx_ctrlc.into_future()).is_ok();
+
+        if let Some(socket) = socket {
+            if let Err(err) = fs::remove_file(socket) {
+                eprintln!("failed to clean up unix socket: {}", err);
+            }
+        }
+
+        status
+    }
+}
+struct App {
+    active: bool,
+    delay: Duration,
+
+    display: *mut Display,
+    info: *mut XScreenSaverInfo,
+
+    not_when_fullscreen: bool,
+    time: u64,
+    timer: String,
+    notify: Option<u64>,
+    notifier: Option<String>,
+    canceller: Option<String>,
+
+    ran_notify: bool,
+    ran_timer: bool,
+
+    fullscreen: Option<bool>,
+
+    time_new: u64
+}
+impl App {
+    fn step(&mut self) -> bool {
+        let default_delay = Duration::from_secs(SCALE); // TODO: const fn
+
+        let idle = if self.active {
+            Some(match get_idle(self.display, self.info) {
+                Ok(idle) => idle / 1000, // Convert to seconds
+                Err(_) => return false
+            })
+        } else { None };
+
+        if self.active &&
+            self.notify.map(|notify| (idle.unwrap() + notify) >= self.time).unwrap_or(idle.unwrap() >= self.time) {
+            let idle = idle.unwrap();
+            if self.not_when_fullscreen && self.fullscreen.is_none() {
                 let mut focus = 0u64;
                 let mut revert = 0i32;
 
@@ -135,15 +287,15 @@ fn do_main() -> bool {
                 let mut bytes = 0u64;
                 let mut data: *mut u8 = unsafe { std::mem::uninitialized() };
 
-                fullscreen = Some(unsafe {
-                    XGetInputFocus(display, &mut focus as *mut _, &mut revert as *mut _);
+                self.fullscreen = Some(unsafe {
+                    XGetInputFocus(self.display, &mut focus as *mut _, &mut revert as *mut _);
 
                     let cstring = CString::from_vec_unchecked("_NET_WM_STATE".into());
 
                     if XGetWindowProperty(
-                        display,
+                        self.display,
                         focus,
-                        XInternAtom(display, cstring.as_ptr(), 0),
+                        XInternAtom(self.display, cstring.as_ptr(), 0),
                         0,
                         !0,
                         0,
@@ -168,7 +320,7 @@ fn do_main() -> bool {
 
                         for i in 0..nitems as isize {
                             let cstring = CString::from_vec_unchecked("_NET_WM_STATE_FULLSCREEN".into());
-                            if *data.offset(i) == (XInternAtom(display, cstring.as_ptr(), 0) & 0xFF) as u8 {
+                            if *data.offset(i) == (XInternAtom(self.display, cstring.as_ptr(), 0) & 0xFF) as u8 {
                                 fullscreen = true;
                                 break;
                             }
@@ -180,38 +332,41 @@ fn do_main() -> bool {
                     }
                 });
             }
-            if !not_when_fullscreen || !fullscreen.unwrap() {
-                if notify.is_some() && !ran_notify {
-                    invoke(&notifier.unwrap());
+            if !self.not_when_fullscreen || !self.fullscreen.unwrap() {
+                if self.notify.is_some() && !self.ran_notify {
+                    invoke(self.notifier.as_ref().unwrap());
 
-                    ran_notify = true;
-                    delay = Duration::from_secs(1);
+                    self.ran_notify = true;
+                    self.delay = Duration::from_secs(1);
 
                     // Since the delay is usually a minute, I could've exceeded both the notify and the timer.
                     // The simple solution is to change the timer to a point where it's guaranteed
                     // it's been _ seconds since the notifier.
-                    time_new = idle + notify.unwrap();
-                } else if idle >= time_new && !ran_timer {
-                    invoke(&timer);
+                    self.time_new = idle + self.notify.unwrap();
+                } else if idle >= self.time_new && !self.ran_timer {
+                    self.trigger();
 
-                    ran_timer = true;
-                    delay = default_delay;
+                    self.ran_timer = true;
+                    self.delay = default_delay;
                 }
             }
         } else {
-            if ran_notify && !ran_timer {
+            if self.ran_notify && !self.ran_timer {
                 // In case the user goes back from being idle between the notify and timer
-                if let Some(canceller) = canceller {
-                    invoke(&canceller);
+                if let Some(canceller) = self.canceller.as_ref() {
+                    invoke(canceller);
                 }
             }
-            delay = default_delay;
-            ran_notify = false;
-            ran_timer  = false;
-            fullscreen = None;
+            self.delay = default_delay;
+            self.ran_notify = false;
+            self.ran_timer  = false;
+            self.fullscreen = None;
         }
 
-        thread::sleep(delay);
+        true
+    }
+    fn trigger(&self) {
+        invoke(&self.timer);
     }
 }
 fn get_idle(display: *mut Display, info: *mut XScreenSaverInfo) -> Result<u64, ()> {
