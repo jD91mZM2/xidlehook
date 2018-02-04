@@ -68,10 +68,8 @@ The socket API is very simple. Each packet is a single byte.
 
 **Note**: The socket API requires the "tokio" feature.
 
-|------|---------------------------|
 | Byte | Command                   |
 |------|---------------------------|
 | 0x0  | Deactivate                |
 | 0x1  | Activate                  |
 | 0x2  | Trigger the timer command |
-|------|---------------------------|
