@@ -4,7 +4,7 @@ description = "xautolock rewrite in Rust, with a few extra features"
 license-file = "LICENSE"
 name = "xidlehook"
 repository = "https://github.com/jD91mZM2/xidlehook"
-version = "0.3.0"
+version = "0.4.0"
 
 [dependencies]
 clap = "2.29.2"
