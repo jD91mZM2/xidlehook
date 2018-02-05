@@ -10,8 +10,10 @@ extern crate x11;
 #[cfg(feature = "pulse")] mod pulse;
 
 #[cfg(any(feature = "pulse", not(feature = "tokio")))] use std::thread;
+#[cfg(feature = "pulse")] use libpulse_sys::context::*;
 #[cfg(feature = "pulse")] use libpulse_sys::context::pa_context;
 #[cfg(feature = "pulse")] use libpulse_sys::context::subscribe::pa_subscription_event_type_t;
+#[cfg(feature = "pulse")] use libpulse_sys::mainloop::standard::*;
 #[cfg(feature = "pulse")] use pulse::PulseAudio;
 #[cfg(feature = "tokio")] use futures::future::{self, Loop};
 #[cfg(feature = "tokio")] use futures::sync::mpsc;
@@ -147,6 +149,7 @@ fn do_main() -> bool {
     let time = value_t_or_exit!(matches, "time", u32) as u64 * SCALE;
     let app = App {
         active: true,
+        audio: false,
         delay: Duration::from_secs(SCALE),
 
         display: display,
@@ -240,34 +243,83 @@ fn do_main() -> bool {
         }
         #[cfg(feature = "pulse")] {
             if not_when_audio {
+                #[derive(Debug)]
+                enum Event {
+                    Clear,
+                    New,
+                    Finish
+                }
+                let (mut tx, rx) = mpsc::unbounded::<Event>();
                 thread::spawn(move || {
-                    let pulse = PulseAudio::new();
+                    let pulse = PulseAudio::default();
 
-                    extern "C" fn callback1(_: *mut pa_context, event: pa_subscription_event_type_t, i: u32, _: *mut c_void) {
-                        if event & pulse::PA_SUBSCRIPTION_EVENT_CHANGE == pulse::PA_SUBSCRIPTION_EVENT_CHANGE {
-                            println!("Audio: Change");
-                        } else if event & pulse::PA_SUBSCRIPTION_EVENT_REMOVE == pulse::PA_SUBSCRIPTION_EVENT_REMOVE {
-                            println!("Audio: Remove");
-                        } else if event & pulse::PA_SUBSCRIPTION_EVENT_NEW == pulse::PA_SUBSCRIPTION_EVENT_NEW {
-                            println!("Audio: New");
-                        }
-                        println!("Event: {}; i: {}", event, i);
-                    }
-                    extern "C" fn callback2(context: *mut pa_context, _: *mut c_void) {
-                        let context = pulse::PulseAudioContext(context);
-                        let state = context.get_state();
-
-                        if state == pulse::PA_CONTEXT_READY {
-                            println!("Ready!");
-                            context.set_subscribe_callback(Some(callback1));
-                            context.subscribe(pulse::PA_SUBSCRIPTION_MASK_SINK_INPUT, None);
+                    extern "C" fn sink_info_callback(
+                        _: *mut pa_context,
+                        info: *const pa_sink_input_info,
+                        _: i32,
+                        userdata: *mut c_void
+                    ) {
+                        unsafe {
+                            let tx = userdata as *mut _ as *mut mpsc::UnboundedSender<Event>;
+                            if info.is_null() {
+                                (&*tx).unbounded_send(Event::Finish).unwrap();
+                            } else if (*info).corked == 0 {
+                                (&*tx).unbounded_send(Event::New).unwrap();
+                            }
                         }
                     }
-                    pulse.set_state_callback(Some(callback2));
-                    pulse.connect();
+                    extern "C" fn subscribe_callback(
+                        ctx: *mut pa_context,
+                        _: pa_subscription_event_type_t,
+                        _: u32,
+                        userdata: *mut c_void
+                    ) {
+                        unsafe {
+                            let tx = userdata as *mut _ as *mut mpsc::UnboundedSender<Event>;
+                            (&*tx).unbounded_send(Event::Clear).unwrap();
 
-                    pulse.run();
+                            // You *could* keep track of events here (like making change events toggle the on/off status),
+                            // but it's not reliable
+                            pa_context_get_sink_input_info_list(ctx, Some(sink_info_callback), userdata);
+                        }
+                    }
+                    extern "C" fn state_callback(ctx: *mut pa_context, userdata: *mut c_void) {
+                        unsafe {
+                            let state = pa_context_get_state(ctx);
+
+                            if state == PA_CONTEXT_READY {
+                                pa_context_set_subscribe_callback(ctx, Some(subscribe_callback), userdata);
+                                pa_context_subscribe(ctx, PA_SUBSCRIPTION_MASK_SINK_INPUT, None, ptr::null_mut());
+
+                                // In case audio already plays
+                                pa_context_get_sink_input_info_list(ctx, Some(sink_info_callback), userdata);
+                            }
+                        }
+                    }
+                    let userdata = &mut tx as *mut _ as *mut c_void;
+                    unsafe {
+                        pa_context_set_state_callback(pulse.ctx, Some(state_callback), userdata);
+                        pa_context_connect(pulse.ctx, ptr::null(), 0, ptr::null());
+
+                        pa_mainloop_run(pulse.main, ptr::null_mut());
+                    }
                 });
+
+                let mut playing = 0;
+
+                let app = Rc::clone(&app);
+
+                handle.spawn(rx.for_each(move |event| {
+                    match event {
+                        Event::Clear => playing = 0,
+                        Event::New => playing += 1,
+                        Event::Finish => {
+                            // We've successfully counted all playing inputs
+                            app.borrow_mut().audio = playing != 0;
+                        }
+                    }
+                    Ok(())
+                }));
             }
         }
 
@@ -301,6 +353,7 @@ fn do_main() -> bool {
 }
 struct App {
     active: bool,
+    audio: bool,
     delay: Duration,
 
     display: *mut Display,
@@ -322,16 +375,19 @@ struct App {
 }
 impl App {
     fn step(&mut self) -> bool {
+        let active = self.active && !self.audio;
+        // audio is always false when not-when-audio isn't set, don't worry
+
         let default_delay = Duration::from_secs(SCALE); // TODO: const fn
 
-        let idle = if self.active {
+        let idle = if active {
             Some(match get_idle(self.display, self.info) {
                 Ok(idle) => idle / 1000, // Convert to seconds
                 Err(_) => return false
             })
         } else { None };
 
-        if self.active &&
+        if active &&
             self.notify.map(|notify| (idle.unwrap() + notify) >= self.time).unwrap_or(idle.unwrap() >= self.time) {
             let idle = idle.unwrap();
             if self.not_when_fullscreen && self.fullscreen.is_none() {
