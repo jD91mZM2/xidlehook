@@ -1,11 +1,18 @@
-#[macro_use] extern crate clap;
+#[cfg(feature = "pulse")] extern crate libpulse_sys;
 #[cfg(feature = "tokio")] extern crate ctrlc;
 #[cfg(feature = "tokio")] extern crate futures;
 #[cfg(feature = "tokio")] extern crate tokio_core;
 #[cfg(feature = "tokio")] extern crate tokio_io;
 #[cfg(feature = "tokio")] extern crate tokio_uds;
+#[macro_use] extern crate clap;
 extern crate x11;
 
+#[cfg(feature = "pulse")] mod pulse;
+
+#[cfg(any(feature = "pulse", not(feature = "tokio")))] use std::thread;
+#[cfg(feature = "pulse")] use libpulse_sys::context::pa_context;
+#[cfg(feature = "pulse")] use libpulse_sys::context::subscribe::pa_subscription_event_type_t;
+#[cfg(feature = "pulse")] use pulse::PulseAudio;
 #[cfg(feature = "tokio")] use futures::future::{self, Loop};
 #[cfg(feature = "tokio")] use futures::sync::mpsc;
 #[cfg(feature = "tokio")] use futures::{Future, Sink, Stream};
@@ -16,7 +23,6 @@ extern crate x11;
 #[cfg(feature = "tokio")] use tokio_core::reactor::{Core, Timeout};
 #[cfg(feature = "tokio")] use tokio_io::io;
 #[cfg(feature = "tokio")] use tokio_uds::UnixListener;
-#[cfg(not(feature = "tokio"))] use std::thread;
 use clap::{App as ClapApp, Arg};
 use std::ffi::CString;
 use std::os::raw::c_void;
@@ -101,13 +107,24 @@ fn do_main() -> bool {
                 .takes_value(true)
         );
     #[cfg(feature = "tokio")]
-    let clap_app = clap_app
-        .arg(
-            Arg::with_name("socket")
-                .help("Listens to events over a unix socket")
-                .long("socket")
-                .takes_value(true)
-        );
+    let mut clap_app = clap_app; // make mutable
+    #[cfg(feature = "tokio")] {
+        clap_app = clap_app
+            .arg(
+                Arg::with_name("socket")
+                    .help("Listens to events over a unix socket")
+                    .long("socket")
+                    .takes_value(true)
+            );
+    }
+    #[cfg(feature = "pulse")] {
+        clap_app = clap_app
+            .arg(
+                Arg::with_name("not-when-audio")
+                    .help("Doesn't lock when anything is playing on PulseAudio")
+                    .long("not-when-audio")
+            );
+    }
     let matches = clap_app.get_matches();
 
     let display = unsafe { XOpenDisplay(ptr::null()) };
@@ -163,6 +180,9 @@ fn do_main() -> bool {
     }
     #[cfg(feature = "tokio")]
     {
+        #[cfg(feature = "pulse")]
+        let not_when_audio  = matches.is_present("not-when-audio");
+
         let socket = matches.value_of("socket");
         let app = Rc::new(RefCell::new(app));
 
@@ -218,10 +238,42 @@ fn do_main() -> bool {
                     Ok(())
                 }))
         }
+        #[cfg(feature = "pulse")] {
+            if not_when_audio {
+                thread::spawn(move || {
+                    let pulse = PulseAudio::new();
+
+                    extern "C" fn callback1(_: *mut pa_context, event: pa_subscription_event_type_t, i: u32, _: *mut c_void) {
+                        if event & pulse::PA_SUBSCRIPTION_EVENT_CHANGE == pulse::PA_SUBSCRIPTION_EVENT_CHANGE {
+                            println!("Audio: Change");
+                        } else if event & pulse::PA_SUBSCRIPTION_EVENT_REMOVE == pulse::PA_SUBSCRIPTION_EVENT_REMOVE {
+                            println!("Audio: Remove");
+                        } else if event & pulse::PA_SUBSCRIPTION_EVENT_NEW == pulse::PA_SUBSCRIPTION_EVENT_NEW {
+                            println!("Audio: New");
+                        }
+                        println!("Event: {}; i: {}", event, i);
+                    }
+                    extern "C" fn callback2(context: *mut pa_context, _: *mut c_void) {
+                        let context = pulse::PulseAudioContext(context);
+                        let state = context.get_state();
+
+                        if state == pulse::PA_CONTEXT_READY {
+                            println!("Ready!");
+                            context.set_subscribe_callback(Some(callback1));
+                            context.subscribe(pulse::PA_SUBSCRIPTION_MASK_SINK_INPUT, None);
+                        }
+                    }
+                    pulse.set_state_callback(Some(callback2));
+                    pulse.connect();
+
+                    pulse.run();
+                });
+            }
+        }
 
         let handle_clone = Rc::clone(&handle);
 
-        handle.spawn(future::loop_fn((), move |()| {
+        handle.spawn(future::loop_fn((), move |_| {
             let app = Rc::clone(&app);
             let delay = app.borrow().delay;
             Timeout::new(delay, &handle_clone)
