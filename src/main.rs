@@ -64,46 +64,46 @@ fn do_main() -> bool {
         .version(crate_version!())
         .arg(
             Arg::with_name("print")
-                .help("Prints the idle time to standard output. This is similar to xprintidle.")
+                .help("Print the idle time to standard output. This is similar to xprintidle.")
                 .long("print")
         )
         .arg(
             Arg::with_name("not-when-fullscreen")
-                .help("Don't call the timer when the current application is fullscreen. \
+                .help("Don't invoke the timer when the current application is fullscreen. \
                        Useful for preventing the lockscreen when watching videos")
                 .long("not-when-fullscreen")
         )
         .arg(
             Arg::with_name("time")
-                .help("Sets the required amount of idle minutes before executing command")
+                .help("Set the required amount of idle minutes before invoking timer")
                 .long("time")
                 .required_unless("print")
                 .takes_value(true)
         )
         .arg(
             Arg::with_name("timer")
-                .help("Sets command to run when timer goes off")
+                .help("Set command to run when the timer goes off")
                 .long("timer")
                 .required_unless("print")
                 .takes_value(true)
         )
         .arg(
             Arg::with_name("notify")
-                .help("Runs the command passed by --notifier _ seconds before timer goes off")
+                .help("Run the command passed by --notifier _ seconds before timer goes off")
                 .long("notify")
                 .requires("notifier")
                 .takes_value(true)
         )
         .arg(
             Arg::with_name("notifier")
-                .help("Sets the command to run when notifier goes off (see --notify)")
+                .help("Set the command to run when notifier goes off (see --notify)")
                 .long("notifier")
                 .requires("notify")
                 .takes_value(true)
         )
         .arg(
             Arg::with_name("canceller")
-                .help("Sets the command to run when user prevents the timer after the notifier has already gone off")
+                .help("Set the command to run when user cancels the timer after the notifier has already gone off")
                 .long("canceller")
                 .requires("notify")
                 .takes_value(true)
@@ -114,7 +114,7 @@ fn do_main() -> bool {
         clap_app = clap_app
             .arg(
                 Arg::with_name("socket")
-                    .help("Listens to events over a unix socket")
+                    .help("Listen to events over a unix socket")
                     .long("socket")
                     .takes_value(true)
             );
@@ -123,7 +123,7 @@ fn do_main() -> bool {
         clap_app = clap_app
             .arg(
                 Arg::with_name("not-when-audio")
-                    .help("Doesn't lock when anything is playing on PulseAudio")
+                    .help("Don't invoke the timer when any audio is playing (PulseAudio specific)")
                     .long("not-when-audio")
             );
     }
