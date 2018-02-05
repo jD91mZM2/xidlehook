@@ -14,6 +14,7 @@ Improvments over xautolock:
  - Not specific to locking. Multiple instances can run at the same time.
  - Optional communication using unix sockets to allow activating and deactivating it.
  - Optionally prevent locking when an application is fullscreen.
+ - Optionally prevent locking when any application plays audio.
 
 Missing features:
  - Magic corners
