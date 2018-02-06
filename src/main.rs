@@ -9,11 +9,10 @@ extern crate x11;
 
 #[cfg(feature = "pulse")] mod pulse;
 
-#[cfg(any(feature = "pulse", not(feature = "tokio")))] use std::thread;
 #[cfg(feature = "pulse")] use libpulse_sys::context::*;
 #[cfg(feature = "pulse")] use libpulse_sys::context::pa_context;
 #[cfg(feature = "pulse")] use libpulse_sys::context::subscribe::pa_subscription_event_type_t;
-#[cfg(feature = "pulse")] use libpulse_sys::mainloop::standard::*;
+#[cfg(feature = "pulse")] use libpulse_sys::mainloop::threaded::*;
 #[cfg(feature = "pulse")] use pulse::PulseAudio;
 #[cfg(feature = "tokio")] use futures::future::{self, Loop};
 #[cfg(feature = "tokio")] use futures::sync::mpsc;
@@ -25,11 +24,12 @@ extern crate x11;
 #[cfg(feature = "tokio")] use tokio_core::reactor::{Core, Timeout};
 #[cfg(feature = "tokio")] use tokio_io::io;
 #[cfg(feature = "tokio")] use tokio_uds::UnixListener;
+#[cfg(not(feature = "tokio"))] use std::thread;
 use clap::{App as ClapApp, Arg};
 use std::ffi::CString;
 use std::os::raw::c_void;
 use std::process::Command;
-use std::ptr;
+use std::{mem, ptr};
 use std::time::Duration;
 use x11::xlib::{Display, XA_ATOM, XCloseDisplay, XDefaultRootWindow, XFree, XGetInputFocus, XGetWindowProperty,
                 XInternAtom, XOpenDisplay};
@@ -170,8 +170,7 @@ fn do_main() -> bool {
         time_new: time
     };
 
-    #[cfg(not(feature = "tokio"))]
-    {
+    #[cfg(not(feature = "tokio"))] {
         let mut app = app;
         loop {
             if !app.step() {
@@ -181,8 +180,7 @@ fn do_main() -> bool {
             thread::sleep(app.delay);
         }
     }
-    #[cfg(feature = "tokio")]
-    {
+    #[cfg(feature = "tokio")] {
         #[cfg(feature = "pulse")]
         let not_when_audio  = matches.is_present("not-when-audio");
 
@@ -241,6 +239,10 @@ fn do_main() -> bool {
                     Ok(())
                 }))
         }
+        #[cfg(feature = "pulse")]
+        let mut _tx = None; // Keep sender alive. This must be declared after _pulse so it's dropped before.
+        #[cfg(feature = "pulse")]
+        let mut _pulse = None; // Keep pulse alive
         #[cfg(feature = "pulse")] {
             if not_when_audio {
                 #[derive(Debug)]
@@ -250,63 +252,53 @@ fn do_main() -> bool {
                     Finish
                 }
                 let (mut tx, rx) = mpsc::unbounded::<Event>();
-                thread::spawn(move || {
-                    let pulse = PulseAudio::default();
+                let pulse = PulseAudio::default();
 
-                    extern "C" fn sink_info_callback(
-                        _: *mut pa_context,
-                        info: *const pa_sink_input_info,
-                        _: i32,
-                        userdata: *mut c_void
-                    ) {
-                        unsafe {
-                            let tx = userdata as *mut _ as *mut mpsc::UnboundedSender<Event>;
-                            if info.is_null() {
-                                (&*tx).unbounded_send(Event::Finish).unwrap();
-                            } else if (*info).corked == 0 {
-                                (&*tx).unbounded_send(Event::New).unwrap();
-                            }
+                extern "C" fn sink_info_callback(
+                    _: *mut pa_context,
+                    info: *const pa_sink_input_info,
+                    _: i32,
+                    userdata: *mut c_void
+                ) {
+                    unsafe {
+                        let tx = userdata as *mut _ as *mut mpsc::UnboundedSender<Event>;
+                        if info.is_null() {
+                            (&*tx).unbounded_send(Event::Finish).unwrap();
+                        } else if (*info).corked == 0 {
+                            (&*tx).unbounded_send(Event::New).unwrap();
                         }
                     }
-                    extern "C" fn subscribe_callback(
-                        ctx: *mut pa_context,
-                        _: pa_subscription_event_type_t,
-                        _: u32,
-                        userdata: *mut c_void
-                    ) {
-                        unsafe {
-                            let tx = userdata as *mut _ as *mut mpsc::UnboundedSender<Event>;
-                            (&*tx).unbounded_send(Event::Clear).unwrap();
+                }
+                extern "C" fn subscribe_callback(
+                    ctx: *mut pa_context,
+                    _: pa_subscription_event_type_t,
+                    _: u32,
+                    userdata: *mut c_void
+                ) {
+                    unsafe {
+                        let tx = userdata as *mut _ as *mut mpsc::UnboundedSender<Event>;
+                        (&*tx).unbounded_send(Event::Clear).unwrap();
 
-                            // You *could* keep track of events here (like making change events toggle the on/off status),
-                            // but it's not reliable
+                        // You *could* keep track of events here (like making change events toggle the on/off status),
+                        // but it's not reliable
+                        pa_context_get_sink_input_info_list(ctx, Some(sink_info_callback), userdata);
+                    }
+                }
+                extern "C" fn state_callback(ctx: *mut pa_context, userdata: *mut c_void) {
+                    unsafe {
+                        let state = pa_context_get_state(ctx);
+
+                        if state == PA_CONTEXT_READY {
+                            pa_context_set_subscribe_callback(ctx, Some(subscribe_callback), userdata);
+                            pa_context_subscribe(ctx, PA_SUBSCRIPTION_MASK_SINK_INPUT, None, ptr::null_mut());
+
+                            // In case audio already plays
                             pa_context_get_sink_input_info_list(ctx, Some(sink_info_callback), userdata);
                         }
                     }
-                    extern "C" fn state_callback(ctx: *mut pa_context, userdata: *mut c_void) {
-                        unsafe {
-                            let state = pa_context_get_state(ctx);
-
-                            if state == PA_CONTEXT_READY {
-                                pa_context_set_subscribe_callback(ctx, Some(subscribe_callback), userdata);
-                                pa_context_subscribe(ctx, PA_SUBSCRIPTION_MASK_SINK_INPUT, None, ptr::null_mut());
-
-                                // In case audio already plays
-                                pa_context_get_sink_input_info_list(ctx, Some(sink_info_callback), userdata);
-                            }
-                        }
-                    }
-                    let userdata = &mut tx as *mut _ as *mut c_void;
-                    unsafe {
-                        pa_context_set_state_callback(pulse.ctx, Some(state_callback), userdata);
-                        pa_context_connect(pulse.ctx, ptr::null(), 0, ptr::null());
-
-                        pa_mainloop_run(pulse.main, ptr::null_mut());
-                    }
-                });
+                }
 
                 let mut playing = 0;
-
                 let app = Rc::clone(&app);
 
                 handle.spawn(rx.for_each(move |event| {
@@ -320,6 +312,18 @@ fn do_main() -> bool {
                     }
                     Ok(())
                 }));
+
+                let userdata = &mut tx as *mut _ as *mut c_void;
+                unsafe {
+                    pa_context_set_state_callback(pulse.ctx, Some(state_callback), userdata);
+                    pa_context_connect(pulse.ctx, ptr::null(), 0, ptr::null());
+
+                    pa_threaded_mainloop_start(pulse.main);
+                }
+
+                // Keep variables alive
+                _pulse = Some(pulse);
+                _tx = Some(tx);
             }
         }
 
@@ -398,7 +402,7 @@ impl App {
                 let mut actual_format = 0i32;
                 let mut nitems = 0u64;
                 let mut bytes = 0u64;
-                let mut data: *mut u8 = unsafe { std::mem::uninitialized() };
+                let mut data: *mut u8 = unsafe { mem::uninitialized() };
 
                 self.fullscreen = Some(unsafe {
                     XGetInputFocus(self.display, &mut focus as *mut _, &mut revert as *mut _);
