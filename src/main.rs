@@ -13,7 +13,7 @@ extern crate x11;
 #[cfg(feature = "pulse")] use libpulse_sys::context::pa_context;
 #[cfg(feature = "pulse")] use libpulse_sys::context::subscribe::pa_subscription_event_type_t;
 #[cfg(feature = "pulse")] use libpulse_sys::mainloop::threaded::*;
-#[cfg(feature = "pulse")] use pulse::{PulseAudio, PulseEvent};
+#[cfg(feature = "pulse")] use pulse::PulseAudio;
 #[cfg(feature = "tokio")] use futures::future::{self, Loop};
 #[cfg(feature = "tokio")] use futures::sync::mpsc;
 #[cfg(feature = "tokio")] use futures::{Future, Sink, Stream};
@@ -53,9 +53,6 @@ const SCALE: u64 = 60; // Second:minute scale. Can be changed for debugging purp
 #[cfg(feature = "tokio")] const COMMAND_DEACTIVATE: u8 = 0;
 #[cfg(feature = "tokio")] const COMMAND_ACTIVATE:   u8 = 1;
 #[cfg(feature = "tokio")] const COMMAND_TRIGGER:    u8 = 2;
-
-#[cfg(feature = "pulse")]
-static mut TX_PULSE: Option<mpsc::UnboundedSender<PulseEvent>> = None;
 
 fn main() {
     let success = do_main();
@@ -262,32 +259,36 @@ fn do_main() -> bool {
                 }))
         }
         #[cfg(feature = "pulse")]
+        let mut _tx_pulse = None; // Keep sender alive. This must be declared after _pulse so it's dropped before.
+        #[cfg(feature = "pulse")]
         let mut _pulse = None; // Keep pulse alive
         #[cfg(feature = "pulse")] {
             if not_when_audio {
-                let (tx, rx) = mpsc::unbounded::<PulseEvent>();
-                let pulse = PulseAudio::default();
-
-                unsafe {
-                    // I'm using global variables here because using
-                    // PulseAudio's `userdata` gave me panics and segmation faults
-                    // in release mode.
-                    TX_PULSE = Some(tx);
+                enum Event {
+                    Clear,
+                    New,
+                    Finish
                 }
+                let (tx, rx) = mpsc::unbounded::<Event>();
+
+                // Can't do this last because we need the updated pointer
+                _tx_pulse = Some(tx);
+                let tx = _tx_pulse.as_mut().unwrap();
+
+                let pulse = PulseAudio::default();
 
                 extern "C" fn sink_info_callback(
                     _: *mut pa_context,
                     info: *const pa_sink_input_info,
                     _: i32,
-                    _: *mut c_void
+                    userdata: *mut c_void
                 ) {
                     unsafe {
-                        let tx = TX_PULSE.as_ref().unwrap();
-
+                        let tx = userdata as *mut _ as *mut mpsc::UnboundedSender<Event>;
                         if info.is_null() {
-                            tx.clone().send(PulseEvent::Finish).wait().unwrap();
+                            (&*tx).unbounded_send(Event::Finish).unwrap();
                         } else if (*info).corked == 0 {
-                            tx.clone().send(PulseEvent::New).wait().unwrap();
+                            (&*tx).unbounded_send(Event::New).unwrap();
                         }
                     }
                 }
@@ -295,27 +296,27 @@ fn do_main() -> bool {
                     ctx: *mut pa_context,
                     _: pa_subscription_event_type_t,
                     _: u32,
-                    _: *mut c_void
+                    userdata: *mut c_void
                 ) {
                     unsafe {
-                        let tx = TX_PULSE.as_ref().unwrap();
-                        tx.clone().send(PulseEvent::Clear).wait().unwrap();
+                        let tx = userdata as *mut _ as *mut mpsc::UnboundedSender<Event>;
+                        (&*tx).unbounded_send(Event::Clear).unwrap();
 
                         // You *could* keep track of events here (like making change events toggle the on/off status),
                         // but it's not reliable
-                        pa_context_get_sink_input_info_list(ctx, Some(sink_info_callback), ptr::null_mut());
+                        pa_context_get_sink_input_info_list(ctx, Some(sink_info_callback), userdata);
                     }
                 }
-                extern "C" fn state_callback(ctx: *mut pa_context, _: *mut c_void) {
+                extern "C" fn state_callback(ctx: *mut pa_context, userdata: *mut c_void) {
                     unsafe {
                         let state = pa_context_get_state(ctx);
 
                         if state == PA_CONTEXT_READY {
-                            pa_context_set_subscribe_callback(ctx, Some(subscribe_callback), ptr::null_mut());
+                            pa_context_set_subscribe_callback(ctx, Some(subscribe_callback), userdata);
                             pa_context_subscribe(ctx, PA_SUBSCRIPTION_MASK_SINK_INPUT, None, ptr::null_mut());
 
                             // In case audio already plays
-                            pa_context_get_sink_input_info_list(ctx, Some(sink_info_callback), ptr::null_mut());
+                            pa_context_get_sink_input_info_list(ctx, Some(sink_info_callback), userdata);
                         }
                     }
                 }
@@ -325,9 +326,9 @@ fn do_main() -> bool {
 
                 handle.spawn(rx.for_each(move |event| {
                     match event {
-                        PulseEvent::Clear => playing = 0,
-                        PulseEvent::New => playing += 1,
-                        PulseEvent::Finish => {
+                        Event::Clear => playing = 0,
+                        Event::New => playing += 1,
+                        Event::Finish => {
                             // We've successfully counted all playing inputs
                             app.borrow_mut().audio = playing != 0;
                         }
@@ -335,17 +336,19 @@ fn do_main() -> bool {
                     Ok(())
                 }));
 
+                let userdata = tx as *mut _ as *mut c_void;
                 unsafe {
-                    pa_context_set_state_callback(pulse.ctx, Some(state_callback), ptr::null_mut());
+                    pa_context_set_state_callback(pulse.ctx, Some(state_callback), userdata);
                     pa_context_connect(pulse.ctx, ptr::null(), 0, ptr::null());
 
                     pa_threaded_mainloop_start(pulse.main);
                 }
 
-                // Keep variables alive
+                // Keep pulse alive
                 _pulse = Some(pulse);
             }
         }
+
         let handle_clone = Rc::clone(&handle);
 
         handle.spawn(future::loop_fn((), move |_| {
@@ -371,11 +374,6 @@ fn do_main() -> bool {
         }));
 
         let status = core.run(rx_stop.into_future()).is_ok();
-
-        #[cfg(feature = "pulse")] {
-            drop(_pulse);
-            unsafe { TX_PULSE = None; }
-        }
 
         if let Some(socket) = socket {
             if let Err(err) = fs::remove_file(socket) {

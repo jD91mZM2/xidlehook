@@ -5,11 +5,6 @@ use std::ffi::CString;
 
 const PA_NAME: &str = "xidlehook";
 
-pub enum PulseEvent {
-    Clear,
-    New,
-    Finish
-}
 pub struct PulseAudio {
     pub main: *mut pa_threaded_mainloop,
     pub ctx: *mut pa_context
