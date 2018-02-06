@@ -33,10 +33,14 @@ xidlehook \
   --notify 10 \
   --notifier  'xrandr --output "$(xrandr | grep primary | cut -d " " -f 1)" --brightness .1' \
   --canceller 'xrandr --output "$(xrandr | grep primary | cut -d " " -f 1)" --brightness 1' \
-  --not-when-fullscreen
+  --not-when-fullscreen \
+  --not-when-audio
 ```
 
 Note: Every command is passed through `sh -c`, so you should be able to mostly use normal syntax.
+
+For an example in practice,
+[here's what I use personally](https://github.com/jD91mZM2/.dotfiles/blob/master/i3/scripts/lock/timer.sh).
 
 # Installation
 
