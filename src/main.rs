@@ -62,6 +62,7 @@ fn do_main() -> bool {
     let clap_app = ClapApp::new(crate_name!())
         .author(crate_authors!())
         .version(crate_version!())
+        // Flags
         .arg(
             Arg::with_name("print")
                 .help("Print the idle time to standard output. This is similar to xprintidle.")
@@ -72,41 +73,55 @@ fn do_main() -> bool {
                 .help("Don't invoke the timer when the current application is fullscreen. \
                        Useful for preventing the lockscreen when watching videos")
                 .long("not-when-fullscreen")
+                .conflicts_with("print")
         )
+        .arg(
+            Arg::with_name("once")
+                .help("Exit after timer command has been invoked once. \
+                       This does not include manual invoking using the socket.")
+                .long("once")
+                .conflicts_with("print")
+        )
+        // Options
         .arg(
             Arg::with_name("time")
                 .help("Set the required amount of idle minutes before invoking timer")
                 .long("time")
-                .required_unless("print")
                 .takes_value(true)
+                .required_unless("print")
+                .conflicts_with("print")
         )
         .arg(
             Arg::with_name("timer")
                 .help("Set command to run when the timer goes off")
                 .long("timer")
-                .required_unless("print")
                 .takes_value(true)
+                .required_unless("print")
+                .conflicts_with("print")
         )
         .arg(
             Arg::with_name("notify")
                 .help("Run the command passed by --notifier _ seconds before timer goes off")
                 .long("notify")
-                .requires("notifier")
                 .takes_value(true)
+                .requires("notifier")
+                .conflicts_with("print")
         )
         .arg(
             Arg::with_name("notifier")
                 .help("Set the command to run when notifier goes off (see --notify)")
                 .long("notifier")
-                .requires("notify")
                 .takes_value(true)
+                .requires("notify")
+                .conflicts_with("print")
         )
         .arg(
             Arg::with_name("canceller")
                 .help("Set the command to run when user cancels the timer after the notifier has already gone off")
                 .long("canceller")
-                .requires("notify")
                 .takes_value(true)
+                .requires("notify")
+                .conflicts_with("print")
         );
     #[cfg(feature = "tokio")]
     let mut clap_app = clap_app; // make mutable
@@ -117,6 +132,7 @@ fn do_main() -> bool {
                     .help("Listen to events over a unix socket")
                     .long("socket")
                     .takes_value(true)
+                    .conflicts_with("print")
             );
     }
     #[cfg(feature = "pulse")] {
@@ -125,6 +141,7 @@ fn do_main() -> bool {
                 Arg::with_name("not-when-audio")
                     .help("Don't invoke the timer when any audio is playing (PulseAudio specific)")
                     .long("not-when-audio")
+                    .conflicts_with("print")
             );
     }
     let matches = clap_app.get_matches();
@@ -156,6 +173,7 @@ fn do_main() -> bool {
         info: info,
 
         not_when_fullscreen: matches.is_present("not-when-fullscreen"),
+        once: matches.is_present("once"),
         time: time,
         timer: matches.value_of("timer").unwrap().to_string(),
         notify: value_t!(matches, "notify", u32).ok().map(|notify| notify as u64),
@@ -173,8 +191,8 @@ fn do_main() -> bool {
     #[cfg(not(feature = "tokio"))] {
         let mut app = app;
         loop {
-            if !app.step() {
-                return false;
+            if let Some(exit) = app.step() {
+                return exit;
             }
 
             thread::sleep(app.delay);
@@ -190,13 +208,14 @@ fn do_main() -> bool {
         let mut core = Core::new().unwrap();
         let handle = Rc::new(core.handle());
 
-        let (tx_ctrlc, rx_ctrlc) = mpsc::channel(1);
-        let tx_ctrlc = RefCell::new(Some(tx_ctrlc));
+        let (tx_stop, rx_stop) = mpsc::channel(1);
+        let tx_stop = Some(tx_stop);
+        let tx_stop_clone = RefCell::new(tx_stop.clone());
 
         if let Err(err) =
             ctrlc::set_handler(move || {
-                if let Some(tx_ctrlc) = tx_ctrlc.borrow_mut().take() {
-                    tx_ctrlc.send(()).wait().unwrap();
+                if let Some(tx_stop) = tx_stop_clone.borrow_mut().take() {
+                    tx_stop.send(()).wait().unwrap();
                 }
             }) {
             eprintln!("failed to create signal handler: {}", err);
@@ -330,21 +349,28 @@ fn do_main() -> bool {
         let handle_clone = Rc::clone(&handle);
 
         handle.spawn(future::loop_fn((), move |_| {
+            let mut tx_stop = tx_stop.clone();
             let app = Rc::clone(&app);
             let delay = app.borrow().delay;
             Timeout::new(delay, &handle_clone)
                 .unwrap()
                 .map_err(|_| ())
                 .and_then(move |_| {
-                    if app.borrow_mut().step() {
-                        Ok(Loop::Continue(()))
+                    let step = app.borrow_mut().step();
+                    if step.is_none() {
+                        return Ok(Loop::Continue(()));
+                    }
+
+                    tx_stop.take().unwrap().send(()).wait().unwrap();
+                    if step.unwrap() {
+                        Ok(Loop::Break(()))
                     } else {
                         Err(())
                     }
                 })
         }));
 
-        let status = core.run(rx_ctrlc.into_future()).is_ok();
+        let status = core.run(rx_stop.into_future()).is_ok();
 
         if let Some(socket) = socket {
             if let Err(err) = fs::remove_file(socket) {
@@ -364,6 +390,7 @@ struct App {
     info: *mut XScreenSaverInfo,
 
     not_when_fullscreen: bool,
+    once: bool,
     time: u64,
     timer: String,
     notify: Option<u64>,
@@ -378,7 +405,7 @@ struct App {
     time_new: u64
 }
 impl App {
-    fn step(&mut self) -> bool {
+    fn step(&mut self) -> Option<bool> {
         let active = self.active && !self.audio;
         // audio is always false when not-when-audio isn't set, don't worry
 
@@ -387,7 +414,7 @@ impl App {
         let idle = if active {
             Some(match get_idle(self.display, self.info) {
                 Ok(idle) => idle / 1000, // Convert to seconds
-                Err(_) => return false
+                Err(_) => return Some(false)
             })
         } else { None };
 
@@ -463,6 +490,10 @@ impl App {
                 } else if idle >= self.time_new && !self.ran_timer {
                     self.trigger();
 
+                    if self.once {
+                        return Some(true);
+                    }
+
                     self.ran_timer = true;
                     self.delay = default_delay;
                 }
@@ -480,7 +511,7 @@ impl App {
             self.fullscreen = None;
         }
 
-        true
+        None
     }
     fn trigger(&self) {
         invoke(&self.timer);
