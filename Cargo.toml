@@ -11,6 +11,7 @@ clap = "2.29.2"
 
 [dependencies.ctrlc]
 optional = true
+features = ["termination"]
 version = "3.1.0"
 
 [dependencies.futures]
