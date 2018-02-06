@@ -12,19 +12,19 @@ It basically just executes a command when the computer has been idle for \_ minu
 Improvments over xautolock:
  - As well as a notifier, there is now a canceller, for when the user stops it from locking.
  - Not specific to locking. Multiple instances can run at the same time.
- - Optional communication using unix sockets to allow activating and deactivating it.
+ - Optionally only run once.
  - Optionally prevent locking when an application is fullscreen.
  - Optionally prevent locking when any application plays audio.
 
 Missing features:
- - Magic corners
- - Killer stuff
- - Bell, because you should be using --notify
- - All the instance related stuff (-activate, -restart, -exit, etc)
+ - Magic corners.
+ - --killer stuff whatever that is.
+ - Bell, because you should be using --notify.
+ - All the instance related stuff (you should use unix sockets with --socket).
 
 # Example
 
-Here's a lock using i3lock, with screen dim support.
+Here's a lock using i3lock, with screen dim support:
 
 ```Bash
 xidlehook \
@@ -67,11 +67,17 @@ cargo build --release
 Does this application have too many dependencies for your taste?  
 You can disable a few with `--no-default-features`.
 
+This however gets rid of:
+ - --not-when-audio
+ - --not-when-fullscreen
+ - Clean shutdown
+ - Socket API
+
+You can re-enable specific features using `--feature`, which takes a comma separated list of features.
+
 # Socket API
 
 The socket API is very simple. Each packet is a single byte.
-
-**Note**: The socket API requires the "tokio" feature.
 
 | Byte | Command                   |
 |------|---------------------------|
