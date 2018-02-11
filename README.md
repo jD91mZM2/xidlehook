@@ -40,7 +40,7 @@ xidlehook \
 Note: Every command is passed through `sh -c`, so you should be able to mostly use normal syntax.
 
 For an example in practice,
-[here's what I use personally](https://github.com/jD91mZM2/.dotfiles/blob/master/i3/scripts/lock/timer.sh).
+[here's what I use personally](https://github.com/jD91mZM2/.dotfiles/blob/master/lock-timer.sh).
 
 # Installation
 
