@@ -2,10 +2,6 @@
 
 *Because xautolock is annoying to work with.*
 
-**Warning:** This is a really new program, and I've already found (and fixed) a ton of subtle bugs.  
-I'm not saying it's not going to work, but it might be a little buggy.  
-Just don't judge it too hard during the first few days, will you?
-
 xidlehook is a general-purpose replacement for xautolock.  
 It basically just executes a command when the computer has been idle for \_ minutes.
 
