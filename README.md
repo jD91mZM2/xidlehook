@@ -80,3 +80,9 @@ The socket API is very simple. Each packet is a single byte.
 | 0x0  | Deactivate                |
 | 0x1  | Activate                  |
 | 0x2  | Trigger the timer command |
+
+For example, if you wanted to lock the screen, you could bind the following to a keyboard shortcut in your window manager:
+
+```Bash
+echo -ne "\x2" | socat - UNIX-CONNECT:/path/to/xidlehook.sock
+```
