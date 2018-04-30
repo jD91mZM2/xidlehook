@@ -190,8 +190,11 @@ fn do_main() -> bool {
     #[cfg(not(feature = "tokio"))] {
         let mut app = app;
         loop {
-            if let Some(exit) = app.step() {
-                return exit;
+            if let Some(result) = app.step() {
+                if let Err(ref err) = result {
+                    eprintln!("{}", err);
+                }
+                return result.is_ok();
             }
 
             thread::sleep(app.delay);
