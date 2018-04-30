@@ -10,14 +10,22 @@ extern crate x11;
 
 #[cfg(feature = "pulse")] mod pulse;
 
-#[cfg(feature = "pulse")] use pulse::{Event, PulseAudio};
-#[cfg(feature = "tokio")] use futures::future::{self, Either, Loop};
-#[cfg(feature = "tokio")] use futures::sync::mpsc;
-#[cfg(feature = "tokio")] use futures::{Future, Stream};
-#[cfg(feature = "tokio")] use std::cell::RefCell;
-#[cfg(feature = "tokio")] use std::fs;
-#[cfg(feature = "tokio")] use std::io::ErrorKind;
-#[cfg(feature = "tokio")] use std::rc::Rc;
+#[cfg(feature = "pulse")]
+use pulse::{Event, PulseAudio};
+#[cfg(feature = "tokio")]
+use futures::{
+    future::{self, Either, Loop},
+    sync::mpsc,
+    Future,
+    Stream
+};
+#[cfg(feature = "tokio")]
+use std::{
+    cell::RefCell,
+    fs,
+    io::ErrorKind,
+    rc::Rc
+};
 #[cfg(feature = "tokio")] use tokio_core::reactor::{Core, Timeout};
 #[cfg(feature = "tokio")] use tokio_io::io;
 #[cfg(feature = "tokio")] use tokio_signal::unix::{Signal, SIGINT, SIGTERM};
@@ -25,14 +33,19 @@ extern crate x11;
 #[cfg(not(feature = "tokio"))] use std::thread;
 use clap::{App as ClapApp, Arg};
 use failure::Error;
-use std::ffi::CString;
-use std::os::raw::c_void;
-use std::process::Command;
-use std::{mem, ptr};
-use std::time::Duration;
-use x11::xlib::{Display, XA_ATOM, XCloseDisplay, XDefaultRootWindow, XFree, XGetInputFocus, XGetWindowProperty,
-                XInternAtom, XOpenDisplay};
-use x11::xss::{XScreenSaverAllocInfo, XScreenSaverInfo, XScreenSaverQueryInfo};
+use std::{
+    ffi::CString,
+    mem,
+    os::raw::c_void,
+    process::Command,
+    ptr,
+    time::Duration
+};
+use x11::{
+    xlib::{Display, XA_ATOM, XCloseDisplay, XDefaultRootWindow, XFree, XGetInputFocus, XGetWindowProperty,
+           XInternAtom, XOpenDisplay},
+    xss::{XScreenSaverAllocInfo, XScreenSaverInfo, XScreenSaverQueryInfo}
+};
 
 struct DeferXClose(*mut Display);
 impl Drop for DeferXClose {

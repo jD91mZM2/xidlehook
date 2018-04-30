@@ -1,10 +1,14 @@
 use futures::sync::mpsc;
-use libpulse_sys::context::*;
-use libpulse_sys::context::pa_context;
-use libpulse_sys::mainloop::threaded::*;
-use std::ffi::CString;
-use std::os::raw::c_void;
-use std::ptr;
+use libpulse_sys::{
+    context::*,
+    context::pa_context,
+    mainloop::threaded::*
+};
+use std::{
+    ffi::CString,
+    os::raw::c_void,
+    ptr
+};
 
 const PA_NAME: &str = "xidlehook";
 
