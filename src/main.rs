@@ -10,11 +10,7 @@ extern crate x11;
 
 #[cfg(feature = "pulse")] mod pulse;
 
-#[cfg(feature = "pulse")] use libpulse_sys::context::*;
-#[cfg(feature = "pulse")] use libpulse_sys::context::pa_context;
-#[cfg(feature = "pulse")] use libpulse_sys::context::subscribe::pa_subscription_event_type_t;
-#[cfg(feature = "pulse")] use libpulse_sys::mainloop::threaded::*;
-#[cfg(feature = "pulse")] use pulse::PulseAudio;
+#[cfg(feature = "pulse")] use pulse::{Event, PulseAudio};
 #[cfg(feature = "tokio")] use futures::future::{self, Either, Loop};
 #[cfg(feature = "tokio")] use futures::sync::mpsc;
 #[cfg(feature = "tokio")] use futures::{Future, Stream};
@@ -51,7 +47,7 @@ impl Drop for DeferXFree {
     }
 }
 
-const SCALE: u64 = 60; // Second:minute scale. Can be changed for debugging purposes.
+const SCALE: u64 = 1; // Second:minute scale. Can be changed for debugging purposes.
 
 #[cfg(feature = "tokio")] const COMMAND_DEACTIVATE: u8 = 0;
 #[cfg(feature = "tokio")] const COMMAND_ACTIVATE:   u8 = 1;
@@ -211,138 +207,10 @@ fn do_main() -> bool {
         let mut core = Core::new().unwrap();
         let handle = Rc::new(core.handle());
 
-        if let Some(socket) = socket {
-            let listener = match UnixListener::bind(socket, &handle) {
-                Ok(listener) => listener,
-                Err(err) => {
-                    eprintln!("failed to bind unix socket: {}", err);
-                    return false;
-                }
-            };
-
-            let app = Rc::clone(&app);
-            let handle_clone = Rc::clone(&handle);
-
-            handle.spawn(listener.incoming()
-                .map_err(|err| eprintln!("unix socket: listener error: {}", err))
-                .for_each(move |(conn, _)| {
-                    let app = Rc::clone(&app);
-                    handle_clone.spawn(future::loop_fn(conn, move |conn| {
-                        let app = Rc::clone(&app);
-                        io::read_exact(conn, [0; 1])
-                            .map_err(|err| {
-                                if err.kind() != ErrorKind::UnexpectedEof {
-                                    eprintln!("unix socket: io error: {}", err);
-                                }
-                            })
-                            .and_then(move |(conn, buf)| {
-                                match buf[0] {
-                                    COMMAND_ACTIVATE   => app.borrow_mut().active = true,
-                                    COMMAND_DEACTIVATE => app.borrow_mut().active = false,
-                                    COMMAND_TRIGGER    => app.borrow().trigger(),
-                                    x => eprintln!("unix socket: invalid command: {}", x)
-                                }
-                                Ok(Loop::Continue(conn))
-                            })
-                    }));
-                    Ok(())
-                }))
-        }
-        #[cfg(feature = "pulse")]
-        let mut _tx_pulse = None; // Keep sender alive. This must be declared after _pulse so it's dropped before.
-        #[cfg(feature = "pulse")]
-        let mut _pulse = None; // Keep pulse alive
-        #[cfg(feature = "pulse")] {
-            if not_when_audio {
-                enum Event {
-                    Clear,
-                    New,
-                    Finish
-                }
-                let (tx, rx) = mpsc::unbounded::<Event>();
-
-                // Can't do this last because we need the updated pointer
-                _tx_pulse = Some(tx);
-                let tx = _tx_pulse.as_mut().unwrap();
-
-                let pulse = PulseAudio::default();
-
-                extern "C" fn sink_info_callback(
-                    _: *mut pa_context,
-                    info: *const pa_sink_input_info,
-                    _: i32,
-                    userdata: *mut c_void
-                ) {
-                    unsafe {
-                        let tx = userdata as *mut _ as *mut mpsc::UnboundedSender<Event>;
-                        if info.is_null() {
-                            (&*tx).unbounded_send(Event::Finish).unwrap();
-                        } else if (*info).corked == 0 {
-                            (&*tx).unbounded_send(Event::New).unwrap();
-                        }
-                    }
-                }
-                extern "C" fn subscribe_callback(
-                    ctx: *mut pa_context,
-                    _: pa_subscription_event_type_t,
-                    _: u32,
-                    userdata: *mut c_void
-                ) {
-                    unsafe {
-                        let tx = userdata as *mut _ as *mut mpsc::UnboundedSender<Event>;
-                        (&*tx).unbounded_send(Event::Clear).unwrap();
-
-                        // You *could* keep track of events here (like making change events toggle the on/off status),
-                        // but it's not reliable
-                        pa_context_get_sink_input_info_list(ctx, Some(sink_info_callback), userdata);
-                    }
-                }
-                extern "C" fn state_callback(ctx: *mut pa_context, userdata: *mut c_void) {
-                    unsafe {
-                        let state = pa_context_get_state(ctx);
-
-                        if state == PA_CONTEXT_READY {
-                            pa_context_set_subscribe_callback(ctx, Some(subscribe_callback), userdata);
-                            pa_context_subscribe(ctx, PA_SUBSCRIPTION_MASK_SINK_INPUT, None, ptr::null_mut());
-
-                            // In case audio already plays
-                            pa_context_get_sink_input_info_list(ctx, Some(sink_info_callback), userdata);
-                        }
-                    }
-                }
-
-                let mut playing = 0;
-                let app = Rc::clone(&app);
-
-                handle.spawn(rx.for_each(move |event| {
-                    match event {
-                        Event::Clear => playing = 0,
-                        Event::New => playing += 1,
-                        Event::Finish => {
-                            // We've successfully counted all playing inputs
-                            app.borrow_mut().audio = playing != 0;
-                        }
-                    }
-                    Ok(())
-                }));
-
-                let userdata = tx as *mut _ as *mut c_void;
-                unsafe {
-                    pa_context_set_state_callback(pulse.ctx, Some(state_callback), userdata);
-                    pa_context_connect(pulse.ctx, ptr::null(), 0, ptr::null());
-
-                    pa_threaded_mainloop_start(pulse.main);
-                }
-
-                // Keep pulse alive
-                _pulse = Some(pulse);
-            }
-        }
-
         let handle_clone = Rc::clone(&handle);
-
+        let app_clone = Rc::clone(&app);
         let future = future::loop_fn((), move |_| {
-                    let app = Rc::clone(&app);
+                    let app = Rc::clone(&app_clone);
                     let delay = app.borrow().delay;
                     Timeout::new(delay, &handle_clone)
                         .unwrap()
@@ -366,7 +234,82 @@ fn do_main() -> bool {
                         .flatten_stream()
                         .into_future()
                         .map_err(|(err, _)| err.into()))
-                .map_err(|err| Error::from(Either::split(err).0));
+                .map_err(|err| Error::from(Either::split(err).0))
+                .map(|_| ());
+        #[cfg(feature = "pulse")]
+        let mut future: Box<Future<Item = (), Error = Error>> = Box::new(future);
+
+        if let Some(socket) = socket {
+            let listener = match UnixListener::bind(socket, &handle) {
+                Ok(listener) => listener,
+                Err(err) => {
+                    eprintln!("failed to bind unix socket: {}", err);
+                    return false;
+                }
+            };
+
+            let handle_clone = Rc::clone(&handle);
+
+            let app_clone = Rc::clone(&app);
+            handle.spawn(listener.incoming()
+                .map_err(|err| eprintln!("unix socket: listener error: {}", err))
+                .for_each(move |(conn, _)| {
+                    let app = Rc::clone(&app_clone);
+                    handle_clone.spawn(future::loop_fn(conn, move |conn| {
+                        let app = Rc::clone(&app);
+                        io::read_exact(conn, [0; 1])
+                            .map_err(|err| {
+                                if err.kind() != ErrorKind::UnexpectedEof {
+                                    eprintln!("unix socket: io error: {}", err);
+                                }
+                            })
+                            .and_then(move |(conn, buf)| {
+                                match buf[0] {
+                                    COMMAND_ACTIVATE   => app.borrow_mut().active = true,
+                                    COMMAND_DEACTIVATE => app.borrow_mut().active = false,
+                                    COMMAND_TRIGGER    => app.borrow().trigger(),
+                                    x => eprintln!("unix socket: invalid command: {}", x)
+                                }
+                                Ok(Loop::Continue(conn))
+                            })
+                    }));
+                    Ok(())
+                }))
+        }
+        #[cfg(feature = "pulse")]
+        let mut _pulse = None; // Keep pulse alive
+        #[cfg(feature = "pulse")] {
+            if not_when_audio {
+                let (tx, rx) = mpsc::unbounded::<Event>();
+
+                let pulse = PulseAudio::default();
+
+                // Keep pulse alive
+                _pulse = Some(pulse);
+                let pulse = _pulse.as_mut().unwrap();
+
+                let mut playing = 0;
+
+                future = Box::new(future
+                    .select2(rx
+                        .for_each(move |event| {
+                            match event {
+                                Event::Clear => playing = 0,
+                                Event::New => playing += 1,
+                                Event::Finish => {
+                                    // We've successfully counted all playing inputs
+                                    app.borrow_mut().audio = playing != 0;
+                                }
+                            }
+                            Ok(())
+                        })
+                        .map_err(|_| format_err!("pulseaudio: sink receive failed")))
+                    .map_err(|err| Error::from(err.split().0))
+                    .map(|_| ()));
+
+                pulse.connect(tx);
+            }
+        }
 
         let result = core.run(future);
 
