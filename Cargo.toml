@@ -5,18 +5,22 @@ license-file = "LICENSE"
 name = "xidlehook"
 repository = "https://github.com/jD91mZM2/xidlehook"
 version = "0.4.4"
-
 [dependencies]
 clap = "2.29.2"
+tokio-signal = "0.1.5"
 
 [dependencies.ctrlc]
-optional = true
 features = ["termination"]
+optional = true
 version = "3.1.0"
 
 [dependencies.futures]
 optional = true
 version = "0.1.18"
+
+[dependencies.libpulse-sys]
+optional = true
+version = "1.0.1"
 
 [dependencies.tokio-core]
 optional = true
@@ -34,11 +38,7 @@ version = "0.1.7"
 features = ["xlib", "xss"]
 version = "2.17.2"
 
-[dependencies.libpulse-sys]
-optional = true
-version = "1.0.1"
-
 [features]
 default = ["pulse"]
-tokio = ["ctrlc", "futures", "tokio-core", "tokio-io", "tokio-uds"]
 pulse = ["tokio", "libpulse-sys"]
+tokio = ["ctrlc", "futures", "tokio-core", "tokio-io", "tokio-uds"]

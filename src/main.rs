@@ -1,8 +1,8 @@
 #[cfg(feature = "pulse")] extern crate libpulse_sys;
-#[cfg(feature = "tokio")] extern crate ctrlc;
 #[cfg(feature = "tokio")] extern crate futures;
 #[cfg(feature = "tokio")] extern crate tokio_core;
 #[cfg(feature = "tokio")] extern crate tokio_io;
+#[cfg(feature = "tokio")] extern crate tokio_signal;
 #[cfg(feature = "tokio")] extern crate tokio_uds;
 #[macro_use] extern crate clap;
 extern crate x11;
@@ -14,15 +14,17 @@ extern crate x11;
 #[cfg(feature = "pulse")] use libpulse_sys::context::subscribe::pa_subscription_event_type_t;
 #[cfg(feature = "pulse")] use libpulse_sys::mainloop::threaded::*;
 #[cfg(feature = "pulse")] use pulse::PulseAudio;
+#[cfg(feature = "tokio")] use futures::IntoFuture;
 #[cfg(feature = "tokio")] use futures::future::{self, Loop};
 #[cfg(feature = "tokio")] use futures::sync::mpsc;
-#[cfg(feature = "tokio")] use futures::{Future, Sink, Stream};
+#[cfg(feature = "tokio")] use futures::{Future, Stream};
 #[cfg(feature = "tokio")] use std::cell::RefCell;
 #[cfg(feature = "tokio")] use std::fs;
 #[cfg(feature = "tokio")] use std::io::ErrorKind;
 #[cfg(feature = "tokio")] use std::rc::Rc;
 #[cfg(feature = "tokio")] use tokio_core::reactor::{Core, Timeout};
 #[cfg(feature = "tokio")] use tokio_io::io;
+#[cfg(feature = "tokio")] use tokio_signal::unix::{Signal, SIGINT, SIGTERM};
 #[cfg(feature = "tokio")] use tokio_uds::UnixListener;
 #[cfg(not(feature = "tokio"))] use std::thread;
 use clap::{App as ClapApp, Arg};
@@ -208,19 +210,6 @@ fn do_main() -> bool {
         let mut core = Core::new().unwrap();
         let handle = Rc::new(core.handle());
 
-        let (tx_stop, rx_stop) = mpsc::channel(1);
-        let tx_stop = Some(tx_stop);
-        let tx_stop_clone = RefCell::new(tx_stop.clone());
-
-        if let Err(err) =
-            ctrlc::set_handler(move || {
-                if let Some(tx_stop) = tx_stop_clone.borrow_mut().take() {
-                    tx_stop.send(()).wait().unwrap();
-                }
-            }) {
-            eprintln!("failed to create signal handler: {}", err);
-        }
-
         if let Some(socket) = socket {
             let listener = match UnixListener::bind(socket, &handle) {
                 Ok(listener) => listener,
@@ -351,29 +340,43 @@ fn do_main() -> bool {
 
         let handle_clone = Rc::clone(&handle);
 
-        handle.spawn(future::loop_fn((), move |_| {
-            let mut tx_stop = tx_stop.clone();
-            let app = Rc::clone(&app);
-            let delay = app.borrow().delay;
-            Timeout::new(delay, &handle_clone)
-                .unwrap()
-                .map_err(|_| ())
-                .and_then(move |_| {
-                    let step = app.borrow_mut().step();
-                    if step.is_none() {
-                        return Ok(Loop::Continue(()));
-                    }
+        let future = future::loop_fn((), move |_| {
+                    let app = Rc::clone(&app);
+                    let delay = app.borrow().delay;
+                    Timeout::new(delay, &handle_clone)
+                        .unwrap()
+                        .map_err(|_| ())
+                        .and_then(move |_| {
+                            let step = app.borrow_mut().step();
+                            if step.is_none() {
+                                return Ok(Loop::Continue(()));
+                            }
 
-                    tx_stop.take().unwrap().send(()).wait().unwrap();
-                    if step.unwrap() {
-                        Ok(Loop::Break(()))
-                    } else {
-                        Err(())
-                    }
+                            if step.unwrap() {
+                                Ok(Loop::Break(()))
+                            } else {
+                                Err(())
+                            }
+                        })
                 })
-        }));
+                .select(Signal::new(SIGINT, &handle)
+                        .flatten_stream()
+                        .into_future()
+                        .map(|_| ())
+                        .map_err(|_| ()))
+                .map(|_| ())
+                .map_err(|_| ())
+                .select(Signal::new(SIGTERM, &handle)
+                        .flatten_stream()
+                        .into_future()
+                        .map(|_| ())
+                        .map_err(|_| ()))
+                .map(|_| ())
+                .map_err(|_| ())
+                .into_future();
 
-        let status = core.run(rx_stop.into_future()).is_ok();
+        let result = core.run(future);
+        // TODO: Stop mapping all errors to () and properly handle them
 
         if let Some(socket) = socket {
             if let Err(err) = fs::remove_file(socket) {
@@ -381,7 +384,7 @@ fn do_main() -> bool {
             }
         }
 
-        status
+        result.is_ok()
     }
 }
 struct App {
