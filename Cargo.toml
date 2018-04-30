@@ -7,7 +7,7 @@ repository = "https://github.com/jD91mZM2/xidlehook"
 version = "0.4.4"
 [dependencies]
 clap = "2.29.2"
-tokio-signal = "0.1.5"
+failure = "0.1.1"
 
 [dependencies.ctrlc]
 features = ["termination"]
@@ -30,6 +30,10 @@ version = "0.1.12"
 optional = true
 version = "0.1.4"
 
+[dependencies.tokio-signal]
+optional = true
+version = "0.1.5"
+
 [dependencies.tokio-uds]
 optional = true
 version = "0.1.7"
@@ -41,4 +45,4 @@ version = "2.17.2"
 [features]
 default = ["pulse"]
 pulse = ["tokio", "libpulse-sys"]
-tokio = ["ctrlc", "futures", "tokio-core", "tokio-io", "tokio-uds"]
+tokio = ["ctrlc", "futures", "tokio-core", "tokio-io", "tokio-signal", "tokio-uds"]

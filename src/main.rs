@@ -5,6 +5,7 @@
 #[cfg(feature = "tokio")] extern crate tokio_signal;
 #[cfg(feature = "tokio")] extern crate tokio_uds;
 #[macro_use] extern crate clap;
+#[macro_use] extern crate failure;
 extern crate x11;
 
 #[cfg(feature = "pulse")] mod pulse;
@@ -14,8 +15,7 @@ extern crate x11;
 #[cfg(feature = "pulse")] use libpulse_sys::context::subscribe::pa_subscription_event_type_t;
 #[cfg(feature = "pulse")] use libpulse_sys::mainloop::threaded::*;
 #[cfg(feature = "pulse")] use pulse::PulseAudio;
-#[cfg(feature = "tokio")] use futures::IntoFuture;
-#[cfg(feature = "tokio")] use futures::future::{self, Loop};
+#[cfg(feature = "tokio")] use futures::future::{self, Either, Loop};
 #[cfg(feature = "tokio")] use futures::sync::mpsc;
 #[cfg(feature = "tokio")] use futures::{Future, Stream};
 #[cfg(feature = "tokio")] use std::cell::RefCell;
@@ -28,6 +28,7 @@ extern crate x11;
 #[cfg(feature = "tokio")] use tokio_uds::UnixListener;
 #[cfg(not(feature = "tokio"))] use std::thread;
 use clap::{App as ClapApp, Arg};
+use failure::Error;
 use std::ffi::CString;
 use std::os::raw::c_void;
 use std::process::Command;
@@ -223,7 +224,7 @@ fn do_main() -> bool {
             let handle_clone = Rc::clone(&handle);
 
             handle.spawn(listener.incoming()
-                .map_err(|err| eprintln!("listener error: {}", err))
+                .map_err(|err| eprintln!("unix socket: listener error: {}", err))
                 .for_each(move |(conn, _)| {
                     let app = Rc::clone(&app);
                     handle_clone.spawn(future::loop_fn(conn, move |conn| {
@@ -231,7 +232,7 @@ fn do_main() -> bool {
                         io::read_exact(conn, [0; 1])
                             .map_err(|err| {
                                 if err.kind() != ErrorKind::UnexpectedEof {
-                                    eprintln!("io error: {}", err);
+                                    eprintln!("unix socket: io error: {}", err);
                                 }
                             })
                             .and_then(move |(conn, buf)| {
@@ -345,38 +346,33 @@ fn do_main() -> bool {
                     let delay = app.borrow().delay;
                     Timeout::new(delay, &handle_clone)
                         .unwrap()
-                        .map_err(|_| ())
+                        .from_err()
                         .and_then(move |_| {
                             let step = app.borrow_mut().step();
-                            if step.is_none() {
-                                return Ok(Loop::Continue(()));
-                            }
-
-                            if step.unwrap() {
-                                Ok(Loop::Break(()))
-                            } else {
-                                Err(())
+                            match step {
+                                None           => Ok(Loop::Continue(())),
+                                Some(Ok(()))   => Ok(Loop::Break(())),
+                                Some(Err(err)) => Err(err)
                             }
                         })
                 })
-                .select(Signal::new(SIGINT, &handle)
+                .map_err(Error::from)
+                .select2(Signal::new(SIGINT, &handle)
                         .flatten_stream()
                         .into_future()
-                        .map(|_| ())
-                        .map_err(|_| ()))
-                .map(|_| ())
-                .map_err(|_| ())
-                .select(Signal::new(SIGTERM, &handle)
+                        .map_err(|(err, _)| err.into()))
+                .map_err(|err| Error::from(Either::split(err).0))
+                .select2(Signal::new(SIGTERM, &handle)
                         .flatten_stream()
                         .into_future()
-                        .map(|_| ())
-                        .map_err(|_| ()))
-                .map(|_| ())
-                .map_err(|_| ())
-                .into_future();
+                        .map_err(|(err, _)| err.into()))
+                .map_err(|err| Error::from(Either::split(err).0));
 
         let result = core.run(future);
-        // TODO: Stop mapping all errors to () and properly handle them
+
+        if let Err(ref err) = result {
+            eprintln!("{}", err);
+        }
 
         if let Some(socket) = socket {
             if let Err(err) = fs::remove_file(socket) {
@@ -411,7 +407,7 @@ struct App {
     time_new: u64
 }
 impl App {
-    fn step(&mut self) -> Option<bool> {
+    fn step(&mut self) -> Option<Result<(), Error>> {
         let active = self.active && !self.audio;
         // audio is always false when not-when-audio isn't set, don't worry
 
@@ -420,7 +416,7 @@ impl App {
         let idle = if active {
             Some(match get_idle(self.display, self.info) {
                 Ok(idle) => idle / 1000, // Convert to seconds
-                Err(_) => return Some(false)
+                Err(err) => return Some(Err(err))
             })
         } else { None };
 
@@ -456,7 +452,7 @@ impl App {
                         &mut bytes,
                         &mut data
                     ) != 0 {
-                        eprintln!("failed to get window property");
+                        eprintln!("warning: failed to get window property");
                         false
                     } else {
                         // Welcome to hell.
@@ -497,7 +493,7 @@ impl App {
                     self.trigger();
 
                     if self.once {
-                        return Some(true);
+                        return Some(Ok(()));
                     }
 
                     self.ran_timer = true;
@@ -523,10 +519,9 @@ impl App {
         invoke(&self.timer);
     }
 }
-fn get_idle(display: *mut Display, info: *mut XScreenSaverInfo) -> Result<u64, ()> {
+fn get_idle(display: *mut Display, info: *mut XScreenSaverInfo) -> Result<u64, Error> {
     if unsafe { XScreenSaverQueryInfo(display, XDefaultRootWindow(display), info) } == 0 {
-        eprintln!("failed to query screen saver info");
-        return Err(());
+        return Err(format_err!("failed to query screen saver info"));
     }
 
     Ok(unsafe { (*info).idle })
@@ -537,6 +532,6 @@ fn invoke(cmd: &str) {
             .arg("-c")
             .arg(cmd)
             .status() {
-        eprintln!("failed to invoke command: {}", err);
+        eprintln!("warning: failed to invoke command: {}", err);
     }
 }
