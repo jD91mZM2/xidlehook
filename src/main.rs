@@ -34,7 +34,6 @@ use std::{
 use clap::{App as ClapApp, Arg};
 use failure::Error;
 use std::{
-    ffi::CString,
     mem,
     os::raw::c_void,
     process::Command,
@@ -60,7 +59,9 @@ impl Drop for DeferXFree {
     }
 }
 
-const SCALE: u64 = 1; // Second:minute scale. Can be changed for debugging purposes.
+const SCALE: u64 = 60; // Second:minute scale. Can be changed for debugging purposes.
+const NET_WM_STATE: &str = "_NET_WM_STATE\0";
+const NET_WM_STATE_FULLSCREEN: &str = "_NET_WM_STATE_FULLSCREEN\0";
 
 #[cfg(feature = "tokio")] const COMMAND_DEACTIVATE: u8 = 0;
 #[cfg(feature = "tokio")] const COMMAND_ACTIVATE:   u8 = 1;
@@ -393,14 +394,12 @@ impl App {
                 let mut data: *mut u8 = unsafe { mem::uninitialized() };
 
                 self.fullscreen = Some(unsafe {
-                    XGetInputFocus(self.display, &mut focus as *mut _, &mut revert as *mut _);
-
-                    let cstring = CString::from_vec_unchecked("_NET_WM_STATE".into());
+                    XGetInputFocus(self.display, &mut focus, &mut revert);
 
                     if XGetWindowProperty(
                         self.display,
                         focus,
-                        XInternAtom(self.display, cstring.as_ptr(), 0),
+                        XInternAtom(self.display, NET_WM_STATE.as_ptr() as *mut i8, 0),
                         0,
                         !0,
                         0,
@@ -414,18 +413,46 @@ impl App {
                         eprintln!("warning: failed to get window property");
                         false
                     } else {
-                        // Welcome to hell.
-                        // I spent waay to long trying to get `data` to work.
-                        // Currently it returns 75, because it overflows 331 to fit into a byte.
-                        // Changing `data` to a *mut u64 gives me 210453397504.
-                        // I have no idea why, and at this point I don't want to know.
-                        // So here I'll just compare it to 75 and assume fullscreen.
-
                         let mut fullscreen = false;
 
+                        #[derive(Clone, Copy, Debug)]
+                        enum Ptr {
+                            U8(*mut u8),
+                            U16(*mut u16),
+                            U32(*mut u32)
+                        }
+                        impl Ptr {
+                            unsafe fn offset(self, i: isize) -> Ptr {
+                                match self {
+                                    Ptr::U8(ptr)  => Ptr::U8(ptr.offset(i)),
+                                    Ptr::U16(ptr) => Ptr::U16(ptr.offset(i)),
+                                    Ptr::U32(ptr) => Ptr::U32(ptr.offset(i)),
+                                }
+                            }
+                            unsafe fn deref_u64(self) -> u64 {
+                                match self {
+                                    Ptr::U8(ptr)  => *ptr as u64,
+                                    Ptr::U16(ptr) => *ptr as u64,
+                                    Ptr::U32(ptr) => *ptr as u64,
+                                }
+                            }
+                        }
+
+                        let data_enum = match actual_format {
+                            8  => Some(Ptr::U8(data)),
+                            16 => Some(Ptr::U16(data as *mut u16)),
+                            32 => Some(Ptr::U32(data as *mut u32)),
+                            _  => None
+                        };
+
+                        let atom = XInternAtom(
+                            self.display,
+                            NET_WM_STATE_FULLSCREEN.as_ptr() as *mut i8,
+                            0
+                        );
+
                         for i in 0..nitems as isize {
-                            let cstring = CString::from_vec_unchecked("_NET_WM_STATE_FULLSCREEN".into());
-                            if *data.offset(i) == (XInternAtom(self.display, cstring.as_ptr(), 0) & 0xFF) as u8 {
+                            if data_enum.unwrap().offset(i).deref_u64() == atom {
                                 fullscreen = true;
                                 break;
                             }
