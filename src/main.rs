@@ -35,7 +35,7 @@ use clap::{App as ClapApp, Arg};
 use failure::Error;
 use std::{
     mem,
-    os::raw::c_void,
+    os::raw::{c_char, c_void},
     process::Command,
     ptr,
     time::Duration
@@ -399,7 +399,7 @@ impl App {
                     if XGetWindowProperty(
                         self.display,
                         focus,
-                        XInternAtom(self.display, NET_WM_STATE.as_ptr() as *mut i8, 0),
+                        XInternAtom(self.display, NET_WM_STATE.as_ptr() as *const c_char, 0),
                         0,
                         !0,
                         0,
@@ -447,7 +447,7 @@ impl App {
 
                         let atom = XInternAtom(
                             self.display,
-                            NET_WM_STATE_FULLSCREEN.as_ptr() as *mut i8,
+                            NET_WM_STATE_FULLSCREEN.as_ptr() as *const c_char,
                             0
                         );
 
