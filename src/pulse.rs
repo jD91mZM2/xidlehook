@@ -1,4 +1,3 @@
-use futures::sync::mpsc;
 use libpulse_sys::{
     context::*,
     context::pa_context,
@@ -7,25 +6,26 @@ use libpulse_sys::{
 use std::{
     ffi::CString,
     os::raw::c_void,
-    ptr
+    process::abort,
+    ptr,
+    sync::mpsc
 };
 
 const PA_NAME: &str = "xidlehook";
 
-#[derive(Clone, Copy)]
-pub enum Event {
-    Clear,
-    New,
-    Finish
+pub type Sender = mpsc::Sender<usize>;
+
+pub struct AudioCounter {
+    count: usize,
+    tx: Sender
 }
-pub type Sender = mpsc::UnboundedSender<Event>;
 
 pub struct PulseAudio {
-    main: *mut pa_threaded_mainloop,
     ctx: *mut pa_context,
+    main: *mut pa_threaded_mainloop,
 
     // needs to be kept alive
-    tx: Option<Sender>
+    counter: Option<AudioCounter>,
 }
 impl Default for PulseAudio {
     fn default() -> Self {
@@ -36,7 +36,7 @@ impl Default for PulseAudio {
                 main: main,
                 ctx: pa_context_new(pa_threaded_mainloop_get_api(main), name.as_ptr()),
 
-                tx: None
+                counter: None
             }
         }
     }
@@ -50,11 +50,11 @@ impl PulseAudio {
             userdata: *mut c_void
         ) {
             unsafe {
-                let tx = userdata as *mut _ as *mut Sender;
+                let counter = &mut *(userdata as *mut _ as *mut AudioCounter);
                 if info.is_null() {
-                    (&*tx).unbounded_send(Event::Finish).unwrap();
+                    counter.tx.send(counter.count).unwrap_or_else(|_| abort());
                 } else if (*info).corked == 0 {
-                    (&*tx).unbounded_send(Event::New).unwrap();
+                    counter.count += 1;
                 }
             }
         }
@@ -65,8 +65,8 @@ impl PulseAudio {
             userdata: *mut c_void
         ) {
             unsafe {
-                let tx = userdata as *mut _ as *mut Sender;
-                (&*tx).unbounded_send(Event::Clear).unwrap();
+                let counter = &mut *(userdata as *mut _ as *mut AudioCounter);
+                counter.count = 0;
 
                 // You *could* keep track of events here (like making change events toggle the on/off status),
                 // but it's not reliable
@@ -87,8 +87,11 @@ impl PulseAudio {
             }
         }
 
-        self.tx = Some(tx);
-        let userdata = self.tx.as_mut().unwrap() as *mut _ as *mut c_void;
+        self.counter = Some(AudioCounter {
+            count: 0,
+            tx: tx
+        });
+        let userdata = self.counter.as_mut().unwrap() as *mut _ as *mut c_void;
         unsafe {
             pa_context_set_state_callback(self.ctx, Some(state_callback), userdata);
             pa_context_connect(self.ctx, ptr::null(), 0, ptr::null());

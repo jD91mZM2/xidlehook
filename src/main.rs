@@ -1,41 +1,34 @@
 #[cfg(feature = "pulse")] extern crate libpulse_sys;
-#[cfg(feature = "tokio")] extern crate futures;
-#[cfg(feature = "tokio")] extern crate tokio_core;
-#[cfg(feature = "tokio")] extern crate tokio_io;
-#[cfg(feature = "tokio")] extern crate tokio_signal;
-#[cfg(feature = "tokio")] extern crate tokio_uds;
 #[macro_use] extern crate clap;
 #[macro_use] extern crate failure;
+extern crate mio;
+extern crate nix;
 extern crate x11;
 
 #[cfg(feature = "pulse")] mod pulse;
 
-#[cfg(feature = "pulse")]
-use pulse::{Event, PulseAudio};
-#[cfg(feature = "tokio")]
-use futures::{
-    future::{self, Either, Loop},
-    sync::mpsc,
-    Future,
-    Stream
-};
-#[cfg(feature = "tokio")]
-use std::{
-    cell::RefCell,
-    fs,
-    io::ErrorKind,
-    rc::Rc
-};
-#[cfg(feature = "tokio")] use tokio_core::reactor::{Core, Timeout};
-#[cfg(feature = "tokio")] use tokio_io::io;
-#[cfg(feature = "tokio")] use tokio_signal::unix::{Signal, SIGINT, SIGTERM};
-#[cfg(feature = "tokio")] use tokio_uds::UnixListener;
-#[cfg(not(feature = "tokio"))] use std::thread;
+#[cfg(feature = "pulse")] use pulse::PulseAudio;
+#[cfg(feature = "pulse")] use std::sync::mpsc;
 use clap::{App as ClapApp, Arg};
 use failure::Error;
+use mio::{*, unix::EventedFd};
+use nix::sys::{
+    signal::{sigprocmask, Signal, SigmaskHow, SigSet},
+    signalfd::{signalfd, SfdFlags}
+};
 use std::{
+    collections::HashMap,
+    fs::{self, File},
+    io::prelude::*,
     mem,
-    os::raw::{c_char, c_void},
+    os::{
+        raw::{c_char, c_void},
+        unix::{
+            io::{AsRawFd, FromRawFd},
+            net::UnixListener
+        }
+    },
+    path::Path,
     process::Command,
     ptr,
     time::Duration
@@ -58,20 +51,26 @@ impl Drop for DeferXFree {
         unsafe { XFree(self.0); }
     }
 }
+struct DeferRemove<T: AsRef<Path>>(T);
+impl<T: AsRef<Path>> Drop for DeferRemove<T> {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
 
 const SCALE: u64 = 60; // Second:minute scale. Can be changed for debugging purposes.
 const NET_WM_STATE: &str = "_NET_WM_STATE\0";
 const NET_WM_STATE_FULLSCREEN: &str = "_NET_WM_STATE_FULLSCREEN\0";
 
-#[cfg(feature = "tokio")] const COMMAND_DEACTIVATE: u8 = 0;
-#[cfg(feature = "tokio")] const COMMAND_ACTIVATE:   u8 = 1;
-#[cfg(feature = "tokio")] const COMMAND_TRIGGER:    u8 = 2;
+const COMMAND_DEACTIVATE: u8 = 0;
+const COMMAND_ACTIVATE:   u8 = 1;
+const COMMAND_TRIGGER:    u8 = 2;
 
-fn main() {
-    let success = do_main();
-    std::process::exit(if success { 0 } else { 1 });
-}
-fn do_main() -> bool {
+const TOKEN_SIGNAL: Token = Token(0);
+const TOKEN_SERVER: Token = Token(1);
+const TOKEN_CLIENT: Token = Token(2);
+
+fn main() -> Result<(), Error> {
     let clap_app = ClapApp::new(crate_name!())
         .author(crate_authors!())
         .version(crate_version!())
@@ -135,19 +134,16 @@ fn do_main() -> bool {
                 .takes_value(true)
                 .requires("notify")
                 .conflicts_with("print")
+        )
+        .arg(
+            Arg::with_name("socket")
+                .help("Listen to events over a unix socket")
+                .long("socket")
+                .takes_value(true)
+                .conflicts_with("print")
         );
-    #[cfg(feature = "tokio")]
+    #[cfg(feature = "pulse")]
     let mut clap_app = clap_app; // make mutable
-    #[cfg(feature = "tokio")] {
-        clap_app = clap_app
-            .arg(
-                Arg::with_name("socket")
-                    .help("Listen to events over a unix socket")
-                    .long("socket")
-                    .takes_value(true)
-                    .conflicts_with("print")
-            );
-    }
     #[cfg(feature = "pulse")] {
         clap_app = clap_app
             .arg(
@@ -161,8 +157,7 @@ fn do_main() -> bool {
 
     let display = unsafe { XOpenDisplay(ptr::null()) };
     if display.is_null() {
-        eprintln!("failed to open x server");
-        return false;
+        bail!("failed to open x server");
     }
     let _cleanup = DeferXClose(display);
 
@@ -170,14 +165,23 @@ fn do_main() -> bool {
     let _cleanup = DeferXFree(info as *mut c_void);
 
     if matches.is_present("print") {
-        if let Ok(idle) = get_idle(display, info) {
-            println!("{}", idle);
-        }
-        return true;
+        println!("{}", get_idle(display, info)?);
+        return Ok(());
     }
 
-    let time = value_t_or_exit!(matches, "time", u32) as u64 * SCALE;
-    let app = App {
+    let mut mask = SigSet::empty();
+    mask.add(Signal::SIGINT);
+    mask.add(Signal::SIGTERM);
+
+    // signalfd won't receive stuff unless
+    // we make the signals be sent synchronously
+    sigprocmask(SigmaskHow::SIG_BLOCK, Some(&mask), None)?;
+
+    let signal = signalfd(-1, &mask, SfdFlags::empty())?;
+    let signal = unsafe { File::from_raw_fd(signal) };
+
+    let time = value_t!(matches, "time", u32).unwrap_or_else(|err| err.exit()) as u64 * SCALE;
+    let mut app = App {
         active: true,
         audio: false,
         delay: Duration::from_secs(SCALE),
@@ -201,146 +205,80 @@ fn do_main() -> bool {
         time_new: time
     };
 
-    #[cfg(not(feature = "tokio"))] {
-        let mut app = app;
-        loop {
-            if let Some(result) = app.step() {
-                if let Err(ref err) = result {
-                    eprintln!("{}", err);
-                }
-                return result.is_ok();
-            }
-
-            thread::sleep(app.delay);
+    #[cfg(feature = "pulse")]
+    let (tx_pulse, rx_pulse) = mpsc::channel();
+    #[cfg(feature = "pulse")]
+    let mut _pulse = None;
+    #[cfg(feature = "pulse")] {
+        if matches.is_present("not-when-audio") {
+            // be careful not to move the struct
+            _pulse = Some(PulseAudio::default());
+            _pulse.as_mut().unwrap().connect(tx_pulse);
         }
     }
-    #[cfg(feature = "tokio")] {
-        #[cfg(feature = "pulse")]
-        let not_when_audio  = matches.is_present("not-when-audio");
 
-        let socket = matches.value_of("socket");
-        let app = Rc::new(RefCell::new(app));
+    let poll = Poll::new()?;
 
-        let mut core = Core::new().unwrap();
-        let handle = Rc::new(core.handle());
+    poll.register(&EventedFd(&signal.as_raw_fd()), TOKEN_SIGNAL, Ready::readable(), PollOpt::edge())?;
 
-        let handle_clone = Rc::clone(&handle);
-        let app_clone = Rc::clone(&app);
-        let future = future::loop_fn((), move |_| {
-                    let app = Rc::clone(&app_clone);
-                    let delay = app.borrow().delay;
-                    Timeout::new(delay, &handle_clone)
-                        .unwrap()
-                        .from_err()
-                        .and_then(move |_| {
-                            let step = app.borrow_mut().step();
-                            match step {
-                                None           => Ok(Loop::Continue(())),
-                                Some(Ok(()))   => Ok(Loop::Break(())),
-                                Some(Err(err)) => Err(err)
-                            }
-                        })
-                })
-                .map_err(Error::from)
-                .select2(Signal::new(SIGINT, &handle)
-                        .flatten_stream()
-                        .into_future()
-                        .map_err(|(err, _)| err.into()))
-                .map_err(|err| Error::from(Either::split(err).0))
-                .select2(Signal::new(SIGTERM, &handle)
-                        .flatten_stream()
-                        .into_future()
-                        .map_err(|(err, _)| err.into()))
-                .map_err(|err| Error::from(Either::split(err).0))
-                .map(|_| ());
-        #[cfg(feature = "pulse")]
-        let mut future: Box<Future<Item = (), Error = Error>> = Box::new(future);
+    let mut _socket = None;
+    let mut listener = match matches.value_of("socket") {
+        None => None,
+        Some(socket) => {
+            let listener = UnixListener::bind(&socket)?;
+            _socket = Some(DeferRemove(socket));
+            poll.register(&EventedFd(&listener.as_raw_fd()), TOKEN_SERVER, Ready::readable(), PollOpt::edge())?;
+            Some(listener)
+        }
+    };
+    let mut clients = HashMap::new();
+    let mut next_client = TOKEN_CLIENT.into();
 
-        if let Some(socket) = socket {
-            let listener = match UnixListener::bind(socket, &handle) {
-                Ok(listener) => listener,
-                Err(err) => {
-                    eprintln!("failed to bind unix socket: {}", err);
-                    return false;
+    let mut events = Events::with_capacity(1024);
+
+    'main: loop {
+        poll.poll(&mut events, Some(app.delay))?;
+
+        for event in &events {
+            match event.token() {
+                TOKEN_SIGNAL => break 'main Ok(()),
+                TOKEN_SERVER => {
+                    let listener = listener.as_mut().expect("got event on non-existant socket");
+                    let (socket, _) = listener.accept()?;
+                    let token = Token(next_client);
+                    poll.register(&EventedFd(&socket.as_raw_fd()), token,
+                                  Ready::readable(), PollOpt::edge())?;
+                    clients.insert(token, socket);
+                    next_client += 1;
+                },
+                token => {
+                    let mut byte = [0];
+                    if clients.get_mut(&token).unwrap().read(&mut byte)? == 0 {
+                        // EOF, drop client
+                        let socket = clients.remove(&token).unwrap();
+                        poll.deregister(&EventedFd(&socket.as_raw_fd()))?;
+                    }
+
+                    match byte[0] {
+                        COMMAND_DEACTIVATE => app.active = false,
+                        COMMAND_ACTIVATE => app.active = true,
+                        COMMAND_TRIGGER => app.trigger(),
+                        byte => eprintln!("socket: unknown command: {}", byte)
+                    }
                 }
-            };
-
-            let handle_clone = Rc::clone(&handle);
-
-            let app_clone = Rc::clone(&app);
-            handle.spawn(listener.incoming()
-                .map_err(|err| eprintln!("unix socket: listener error: {}", err))
-                .for_each(move |(conn, _)| {
-                    let app = Rc::clone(&app_clone);
-                    handle_clone.spawn(future::loop_fn(conn, move |conn| {
-                        let app = Rc::clone(&app);
-                        io::read_exact(conn, [0; 1])
-                            .map_err(|err| {
-                                if err.kind() != ErrorKind::UnexpectedEof {
-                                    eprintln!("unix socket: io error: {}", err);
-                                }
-                            })
-                            .and_then(move |(conn, buf)| {
-                                match buf[0] {
-                                    COMMAND_ACTIVATE   => app.borrow_mut().active = true,
-                                    COMMAND_DEACTIVATE => app.borrow_mut().active = false,
-                                    COMMAND_TRIGGER    => app.borrow().trigger(),
-                                    x => eprintln!("unix socket: invalid command: {}", x)
-                                }
-                                Ok(Loop::Continue(conn))
-                            })
-                    }));
-                    Ok(())
-                }))
+            }
         }
-        #[cfg(feature = "pulse")]
-        let mut _pulse = None; // Keep pulse alive
+
         #[cfg(feature = "pulse")] {
-            if not_when_audio {
-                let (tx, rx) = mpsc::unbounded::<Event>();
-
-                let pulse = PulseAudio::default();
-
-                // Keep pulse alive
-                _pulse = Some(pulse);
-                let pulse = _pulse.as_mut().unwrap();
-
-                let mut playing = 0;
-
-                future = Box::new(future
-                    .select2(rx
-                        .for_each(move |event| {
-                            match event {
-                                Event::Clear => playing = 0,
-                                Event::New => playing += 1,
-                                Event::Finish => {
-                                    // We've successfully counted all playing inputs
-                                    app.borrow_mut().audio = playing != 0;
-                                }
-                            }
-                            Ok(())
-                        })
-                        .map_err(|_| format_err!("pulseaudio: sink receive failed")))
-                    .map_err(|err| Error::from(err.split().0))
-                    .map(|_| ()));
-
-                pulse.connect(tx);
+            while let Ok(count) = rx_pulse.try_recv() {
+                // If the number of active audio devices is more than 0
+                app.audio = count > 0;
             }
         }
 
-        let result = core.run(future);
-
-        if let Err(ref err) = result {
-            eprintln!("{}", err);
+        if let Some(val) = app.step() {
+            break val;
         }
-
-        if let Some(socket) = socket {
-            if let Err(err) = fs::remove_file(socket) {
-                eprintln!("failed to clean up unix socket: {}", err);
-            }
-        }
-
-        result.is_ok()
     }
 }
 struct App {
@@ -369,7 +307,7 @@ struct App {
 impl App {
     fn step(&mut self) -> Option<Result<(), Error>> {
         let active = self.active && !self.audio;
-        // audio is always false when not-when-audio isn't set, don't worry
+        // audio is always false when not-when-audio isn't set
 
         let default_delay = Duration::from_secs(SCALE); // TODO: const fn
 
@@ -507,7 +445,7 @@ impl App {
 }
 fn get_idle(display: *mut Display, info: *mut XScreenSaverInfo) -> Result<u64, Error> {
     if unsafe { XScreenSaverQueryInfo(display, XDefaultRootWindow(display), info) } == 0 {
-        return Err(format_err!("failed to query screen saver info"));
+        bail!("failed to query screen saver info");
     }
 
     Ok(unsafe { (*info).idle })
