@@ -50,7 +50,13 @@ Or if you're on Arch Linux and prefer using the AUR:
 
 [AUR package](https://aur.archlinux.org/packages/xidlehook/)
 
-Or if you want to clone it:
+Or if you're using Nix:
+
+```
+nix-env -iA nixpkgs.xidlehook
+```
+
+Or if you want to clone it manually:
 
 ```
 git clone https://github.com/jD91mZM2/xidlehook
@@ -60,16 +66,9 @@ cargo build --release
 
 ## Too bloaty?
 
-Does this application have too many dependencies for your taste?  
-You can disable a few with `--no-default-features`.
-
-This however gets rid of:
- - --not-when-audio
- - --not-when-fullscreen
- - Clean shutdown
- - Socket API
-
-You can re-enable specific features using `--feature`, which takes a comma separated list of features.
+Are you not using pulseaudio?  
+You can disable that requirement completely with `--no-default-features`!  
+This however gets rid of --not-when-audio.
 
 # Socket API
 
@@ -81,7 +80,7 @@ The socket API is very simple. Each packet is a single byte.
 | 0x1  | Activate                  |
 | 0x2  | Trigger the timer command |
 
-For example, if you wanted to lock the screen, you could bind the following to a keyboard shortcut in your window manager:
+For example, if you wanted to lock the screen, you could bind the following to a keyboard shortcut:
 
 ```Bash
 echo -ne "\x2" | socat - UNIX-CONNECT:/path/to/xidlehook.sock
