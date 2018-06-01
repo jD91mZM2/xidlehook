@@ -13,18 +13,18 @@ use clap::{App as ClapApp, Arg};
 use failure::Error;
 use mio::{*, unix::EventedFd};
 use nix::sys::{
-    signal::{sigprocmask, Signal, SigmaskHow, SigSet},
-    signalfd::{signalfd, SfdFlags}
+    signal::{Signal, SigSet},
+    signalfd::{SignalFd}
 };
 use std::{
     collections::HashMap,
-    fs::{self, File},
+    fs,
     io::prelude::*,
     mem,
     os::{
         raw::{c_char, c_void},
         unix::{
-            io::{AsRawFd, FromRawFd},
+            io::AsRawFd,
             net::UnixListener
         }
     },
@@ -175,10 +175,9 @@ fn main() -> Result<(), Error> {
 
     // signalfd won't receive stuff unless
     // we make the signals be sent synchronously
-    sigprocmask(SigmaskHow::SIG_BLOCK, Some(&mask), None)?;
+    mask.thread_block()?;
 
-    let signal = signalfd(-1, &mask, SfdFlags::empty())?;
-    let signal = unsafe { File::from_raw_fd(signal) };
+    let signal = SignalFd::new(&mask)?;
 
     let time = value_t!(matches, "time", u32).unwrap_or_else(|err| err.exit()) as u64 * SCALE;
     let mut app = App {
