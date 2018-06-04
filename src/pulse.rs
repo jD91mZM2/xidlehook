@@ -42,7 +42,9 @@ impl Default for PulseAudio {
     }
 }
 impl PulseAudio {
-    pub fn connect(&mut self, tx: Sender) {
+    /// Start a new thread that will send events to tx.
+    /// You will need to make sure that this struct is never moved around in memory after this.
+    pub unsafe fn connect(&mut self, tx: Sender) {
         extern "C" fn sink_info_callback(
             _: *mut pa_context,
             info: *const pa_sink_input_info,
@@ -92,12 +94,10 @@ impl PulseAudio {
             tx: tx
         });
         let userdata = self.counter.as_mut().unwrap() as *mut _ as *mut c_void;
-        unsafe {
-            pa_context_set_state_callback(self.ctx, Some(state_callback), userdata);
-            pa_context_connect(self.ctx, ptr::null(), 0, ptr::null());
+        pa_context_set_state_callback(self.ctx, Some(state_callback), userdata);
+        pa_context_connect(self.ctx, ptr::null(), 0, ptr::null());
 
-            pa_threaded_mainloop_start(self.main);
-        }
+        pa_threaded_mainloop_start(self.main);
     }
 }
 impl Drop for PulseAudio {

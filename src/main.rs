@@ -212,7 +212,9 @@ fn main() -> Result<(), Error> {
         if matches.is_present("not-when-audio") {
             // be careful not to move the struct
             _pulse = Some(PulseAudio::default());
-            _pulse.as_mut().unwrap().connect(tx_pulse);
+            unsafe {
+                _pulse.as_mut().unwrap().connect(tx_pulse);
+            }
         }
     }
 
