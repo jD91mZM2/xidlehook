@@ -185,12 +185,12 @@ fn main() -> Result<(), Error> {
         audio: false,
         delay: Duration::from_secs(SCALE),
 
-        display: display,
-        info: info,
+        display,
+        info,
 
         not_when_fullscreen: matches.is_present("not-when-fullscreen"),
         once: matches.is_present("once"),
-        time: time,
+        time,
         timer: matches.value_of("timer").unwrap().to_string(),
         notify: value_t!(matches, "notify", u32).ok().map(|notify| notify as u64),
         notifier: matches.value_of("notifier").map(String::from),

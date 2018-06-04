@@ -33,7 +33,7 @@ impl Default for PulseAudio {
             let main = pa_threaded_mainloop_new();
             let name = CString::from_vec_unchecked(PA_NAME.as_bytes().to_vec());
             Self {
-                main: main,
+                main,
                 ctx: pa_context_new(pa_threaded_mainloop_get_api(main), name.as_ptr()),
 
                 counter: None
@@ -91,7 +91,7 @@ impl PulseAudio {
 
         self.counter = Some(AudioCounter {
             count: 0,
-            tx: tx
+            tx
         });
         let userdata = self.counter.as_mut().unwrap() as *mut _ as *mut c_void;
         pa_context_set_state_callback(self.ctx, Some(state_callback), userdata);
