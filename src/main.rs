@@ -1,8 +1,8 @@
+#[cfg(feature = "nix")] extern crate nix;
 #[cfg(feature = "pulse")] extern crate libpulse_sys;
 #[macro_use] extern crate clap;
 #[macro_use] extern crate failure;
 extern crate mio;
-extern crate nix;
 extern crate x11;
 
 #[cfg(feature = "pulse")] mod pulse;
@@ -12,6 +12,7 @@ extern crate x11;
 use clap::{App as ClapApp, Arg};
 use failure::Error;
 use mio::{*, unix::EventedFd};
+#[cfg(feature = "nix")]
 use nix::sys::{
     signal::{Signal, SigSet},
     signalfd::{SignalFd}
@@ -66,6 +67,7 @@ const COMMAND_DEACTIVATE: u8 = 0;
 const COMMAND_ACTIVATE:   u8 = 1;
 const COMMAND_TRIGGER:    u8 = 2;
 
+#[cfg(feature = "nix")]
 const TOKEN_SIGNAL: Token = Token(0);
 const TOKEN_SERVER: Token = Token(1);
 const TOKEN_CLIENT: Token = Token(2);
@@ -169,15 +171,19 @@ fn main() -> Result<(), Error> {
         return Ok(());
     }
 
-    let mut mask = SigSet::empty();
-    mask.add(Signal::SIGINT);
-    mask.add(Signal::SIGTERM);
+    #[cfg(feature = "nix")]
+    let signal = {
+        let mut mask = SigSet::empty();
+        mask.add(Signal::SIGINT);
+        mask.add(Signal::SIGTERM);
 
-    // signalfd won't receive stuff unless
-    // we make the signals be sent synchronously
-    mask.thread_block()?;
+        // signalfd won't receive stuff unless
+        // we make the signals be sent synchronously
+        mask.thread_block()?;
 
-    let signal = SignalFd::new(&mask)?;
+        SignalFd::new(&mask)?
+    };
+
 
     let time = value_t!(matches, "time", u32).unwrap_or_else(|err| err.exit()) as u64 * SCALE;
     let mut app = App {
@@ -220,6 +226,7 @@ fn main() -> Result<(), Error> {
 
     let poll = Poll::new()?;
 
+    #[cfg(feature = "nix")]
     poll.register(&EventedFd(&signal.as_raw_fd()), TOKEN_SIGNAL, Ready::readable(), PollOpt::edge())?;
 
     let mut _socket = None;
@@ -242,6 +249,7 @@ fn main() -> Result<(), Error> {
 
         for event in &events {
             match event.token() {
+                #[cfg(feature = "nix")]
                 TOKEN_SIGNAL => break 'main Ok(()),
                 TOKEN_SERVER => {
                     let listener = listener.as_mut().expect("got event on non-existant socket");
