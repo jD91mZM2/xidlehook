@@ -52,7 +52,7 @@ impl PulseAudio {
             userdata: *mut c_void
         ) {
             unsafe {
-                let counter = &mut *(userdata as *mut _ as *mut AudioCounter);
+                let counter = &mut *(userdata as *mut AudioCounter);
                 if info.is_null() {
                     counter.tx.send(counter.count).unwrap_or_else(|_| abort());
                 } else if (*info).corked == 0 {
@@ -67,7 +67,7 @@ impl PulseAudio {
             userdata: *mut c_void
         ) {
             unsafe {
-                let counter = &mut *(userdata as *mut _ as *mut AudioCounter);
+                let counter = &mut *(userdata as *mut AudioCounter);
                 counter.count = 0;
 
                 // You *could* keep track of events here (like making change events toggle the on/off status),
