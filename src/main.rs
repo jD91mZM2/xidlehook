@@ -266,6 +266,7 @@ fn main() -> Result<(), Error> {
                         // EOF, drop client
                         let socket = clients.remove(&token).unwrap();
                         poll.deregister(&EventedFd(&socket.as_raw_fd()))?;
+                        continue;
                     }
 
                     match byte[0] {
