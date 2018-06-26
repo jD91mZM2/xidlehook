@@ -18,6 +18,10 @@ Missing features:
  - Bell, because you should be using --notify.
  - All the instance related stuff (you should use unix sockets with --socket).
 
+*Note: xidlehook's timer is only accurate to the minute and may very well execute 59 seconds later than it's supposed to.
+However, the delay between notifier and timer is accurate to the second.
+See [#6](https://github.com/jD91mZM2/xidlehook/issues/6) for technical details.*
+
 # Example
 
 Here's a lock using i3lock, with screen dim support:
