@@ -50,15 +50,7 @@ Installation using `cargo`:
 cargo install xidlehook
 ```
 
-Or if you're on Arch Linux and prefer using the AUR:
-
-[AUR package](https://aur.archlinux.org/packages/xidlehook/)
-
-Or if you're using Nix:
-
-```
-nix-env -iA nixpkgs.xidlehook
-```
+It's also available on Nix and the [AUR (not officially maintained)](https://aur.archlinux.org/packages/xidlehook/).
 
 Or if you want to clone it manually:
 
