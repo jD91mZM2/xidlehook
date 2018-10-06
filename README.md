@@ -68,15 +68,18 @@ This however gets rid of --not-when-audio.
 
 # Socket API
 
-The socket API is very simple. Each packet is a single byte.
+The socket API is very simple. Each command is a single byte, sent over a unix
+socket. Bind a file using `--socket /path/to/xidlehook.sock` (where the path is
+whatever you want), and then you can send one of the following:
 
-| Byte | Command                   |
-|------|---------------------------|
-| 0x0  | Deactivate                |
-| 0x1  | Activate                  |
-| 0x2  | Trigger the timer command |
+| Byte | Command                           |
+| ---  | ---                               |
+| 0    | Deactivate                        |
+| 1    | Activate                          |
+| 2    | Run the timer command immediately |
 
-For example, if you wanted to lock the screen, you could bind the following to a keyboard shortcut:
+A common use case of `xidlehook` is using it to run a lockscreen. To then
+manually lock the screen, you could bind this bash command to a shortcut:
 
 ```Bash
 echo -ne "\x2" | socat - UNIX-CONNECT:/path/to/xidlehook.sock
