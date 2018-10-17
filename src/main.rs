@@ -6,6 +6,7 @@ extern crate mio;
 extern crate x11;
 
 #[cfg(feature = "pulse")] mod pulse;
+mod x11api;
 
 #[cfg(feature = "pulse")] use pulse::PulseAudio;
 #[cfg(feature = "pulse")] use std::sync::mpsc;
@@ -15,15 +16,14 @@ use mio::{*, unix::EventedFd};
 #[cfg(feature = "nix")]
 use nix::sys::{
     signal::{Signal, SigSet},
-    signalfd::{SignalFd}
+    signalfd::{SignalFd, SfdFlags}
 };
 use std::{
     collections::HashMap,
     fs,
-    io::prelude::*,
-    mem,
+    io::{self, prelude::*},
     os::{
-        raw::{c_char, c_void},
+        raw::c_void,
         unix::{
             io::AsRawFd,
             net::UnixListener
@@ -35,9 +35,8 @@ use std::{
     time::Duration
 };
 use x11::{
-    xlib::{Display, XA_ATOM, XCloseDisplay, XDefaultRootWindow, XFree, XGetInputFocus, XGetWindowProperty,
-           XInternAtom, XOpenDisplay},
-    xss::{XScreenSaverAllocInfo, XScreenSaverInfo, XScreenSaverQueryInfo}
+    xlib::{Display, XCloseDisplay, XFree, XOpenDisplay},
+    xss::{XScreenSaverAllocInfo, XScreenSaverInfo}
 };
 
 struct DeferXClose(*mut Display);
@@ -60,8 +59,6 @@ impl<T: AsRef<Path>> Drop for DeferRemove<T> {
 }
 
 const SCALE: u64 = 60; // Second:minute scale. Can be changed for debugging purposes.
-const NET_WM_STATE: &str = "_NET_WM_STATE\0";
-const NET_WM_STATE_FULLSCREEN: &str = "_NET_WM_STATE_FULLSCREEN\0";
 
 const COMMAND_DEACTIVATE: u8 = 0;
 const COMMAND_ACTIVATE:   u8 = 1;
@@ -71,6 +68,14 @@ const COMMAND_TRIGGER:    u8 = 2;
 const TOKEN_SIGNAL: Token = Token(0);
 const TOKEN_SERVER: Token = Token(1);
 const TOKEN_CLIENT: Token = Token(2);
+
+fn maybe<T>(res: io::Result<T>) -> io::Result<Option<T>> {
+    match res {
+        Ok(res) => Ok(Some(res)),
+        Err(ref err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
+        Err(err) => Err(err)
+    }
+}
 
 fn main() -> Result<(), Error> {
     let clap_app = ClapApp::new(crate_name!())
@@ -167,12 +172,12 @@ fn main() -> Result<(), Error> {
     let _cleanup = DeferXFree(info as *mut c_void);
 
     if matches.is_present("print") {
-        println!("{}", get_idle(display, info)?);
+        println!("{}", x11api::get_idle(display, info)?);
         return Ok(());
     }
 
     #[cfg(feature = "nix")]
-    let signal = {
+    let mut signal = {
         let mut mask = SigSet::empty();
         mask.add(Signal::SIGINT);
         mask.add(Signal::SIGTERM);
@@ -181,7 +186,7 @@ fn main() -> Result<(), Error> {
         // we make the signals be sent synchronously
         mask.thread_block()?;
 
-        SignalFd::new(&mask)?
+        SignalFd::with_flags(&mask, SfdFlags::SFD_NONBLOCK)?
     };
 
 
@@ -202,12 +207,11 @@ fn main() -> Result<(), Error> {
         notifier: matches.value_of("notifier").map(String::from),
         canceller: matches.value_of("canceller").map(String::from),
 
+        time_new: time,
         ran_notify: false,
         ran_timer:  false,
 
-        fullscreen: None,
-
-        time_new: time
+        fullscreen: None
     };
 
     #[cfg(feature = "pulse")]
@@ -233,8 +237,11 @@ fn main() -> Result<(), Error> {
     let mut listener = match matches.value_of("socket") {
         None => None,
         Some(socket) => {
-            let listener = UnixListener::bind(&socket)?;
-            _socket = Some(DeferRemove(socket));
+            let mut listener = UnixListener::bind(&socket)?;
+            _socket = Some(DeferRemove(socket)); // remove file when exiting
+
+            listener.set_nonblocking(true)?;
+
             poll.register(&EventedFd(&listener.as_raw_fd()), TOKEN_SERVER, Ready::readable(), PollOpt::edge())?;
             Some(listener)
         }
@@ -250,31 +257,42 @@ fn main() -> Result<(), Error> {
         for event in &events {
             match event.token() {
                 #[cfg(feature = "nix")]
-                TOKEN_SIGNAL => break 'main Ok(()),
-                TOKEN_SERVER => {
-                    let listener = listener.as_mut().expect("got event on non-existant socket");
-                    let (socket, _) = listener.accept()?;
+                TOKEN_SIGNAL => if signal.read_signal()?.is_some() { break 'main; },
+                TOKEN_SERVER => if let Some(listener) = listener.as_mut() {
+                    let (mut socket, _) = match maybe(listener.accept())? {
+                        Some(socket) => socket,
+                        None => continue
+                    };
+                    socket.set_nonblocking(true)?;
+
                     let token = Token(next_client);
-                    poll.register(&EventedFd(&socket.as_raw_fd()), token,
-                                  Ready::readable(), PollOpt::edge())?;
+                    poll.register(&EventedFd(&socket.as_raw_fd()), token, Ready::readable(), PollOpt::edge())?;
+
                     clients.insert(token, socket);
                     next_client += 1;
                 },
                 token => {
                     let mut byte = [0];
-                    if clients.get_mut(&token).unwrap().read(&mut byte)? == 0 {
-                        // EOF, drop client
-                        let socket = clients.remove(&token).unwrap();
-                        poll.deregister(&EventedFd(&socket.as_raw_fd()))?;
-                        continue;
+
+                    let read = match clients.get_mut(&token) {
+                        None => continue,
+                        Some(client) => maybe(client.read(&mut byte))?
+                    };
+                    match read {
+                        None => (),
+                        Some(0) => {
+                            // EOF, drop client
+                            let socket = clients.remove(&token).unwrap();
+                            poll.deregister(&EventedFd(&socket.as_raw_fd()))?;
+                        },
+                        Some(_) => match byte[0] {
+                            COMMAND_DEACTIVATE => app.active = false,
+                            COMMAND_ACTIVATE => app.active = true,
+                            COMMAND_TRIGGER => app.trigger(),
+                            byte => eprintln!("socket: unknown command: {}", byte)
+                        }
                     }
 
-                    match byte[0] {
-                        COMMAND_DEACTIVATE => app.active = false,
-                        COMMAND_ACTIVATE => app.active = true,
-                        COMMAND_TRIGGER => app.trigger(),
-                        byte => eprintln!("socket: unknown command: {}", byte)
-                    }
                 }
             }
         }
@@ -286,9 +304,20 @@ fn main() -> Result<(), Error> {
             }
         }
 
-        if let Some(val) = app.step() {
-            break val;
+        if !app.step()? {
+            // Returning Ok(false) means exiting
+            break;
         }
+    }
+    Ok(())
+}
+fn invoke(cmd: &str) {
+    if let Err(err) =
+        Command::new("sh")
+            .arg("-c")
+            .arg(cmd)
+            .status() {
+        eprintln!("warning: failed to invoke command: {}", err);
     }
 }
 struct App {
@@ -307,165 +336,83 @@ struct App {
     notifier: Option<String>,
     canceller: Option<String>,
 
+    time_new: u64,
     ran_notify: bool,
     ran_timer: bool,
 
-    fullscreen: Option<bool>,
-
-    time_new: u64
+    fullscreen: Option<bool>
 }
 impl App {
-    fn step(&mut self) -> Option<Result<(), Error>> {
-        let active = self.active && !self.audio;
-        // audio is always false when not-when-audio isn't set
+    fn trigger(&mut self) {
+        invoke(&self.timer);
 
+        self.ran_notify = true;
+        self.ran_timer = true;
+        self.delay = Duration::from_secs(SCALE); // TODO: const fn;
+    }
+    fn reset(&mut self) {
         let default_delay = Duration::from_secs(SCALE); // TODO: const fn
 
-        let idle = if active {
-            Some(match get_idle(self.display, self.info) {
-                Ok(idle) => idle / 1000, // Convert to seconds
-                Err(err) => return Some(Err(err))
-            })
-        } else { None };
-
-        if active &&
-            self.notify.map(|notify| (idle.unwrap() + notify) >= self.time).unwrap_or(idle.unwrap() >= self.time) {
-            let idle = idle.unwrap();
-            if self.not_when_fullscreen && self.fullscreen.is_none() {
-                let mut focus = 0u64;
-                let mut revert = 0i32;
-
-                let mut actual_type = 0u64;
-                let mut actual_format = 0i32;
-                let mut nitems = 0u64;
-                let mut bytes = 0u64;
-                let mut data: *mut u8 = unsafe { mem::uninitialized() };
-
-                self.fullscreen = Some(unsafe {
-                    XGetInputFocus(self.display, &mut focus, &mut revert);
-
-                    if XGetWindowProperty(
-                        self.display,
-                        focus,
-                        XInternAtom(self.display, NET_WM_STATE.as_ptr() as *const c_char, 0),
-                        0,
-                        !0,
-                        0,
-                        XA_ATOM,
-                        &mut actual_type,
-                        &mut actual_format,
-                        &mut nitems,
-                        &mut bytes,
-                        &mut data
-                    ) != 0 {
-                        eprintln!("warning: failed to get window property");
-                        false
-                    } else {
-                        let mut fullscreen = false;
-
-                        #[derive(Clone, Copy, Debug)]
-                        enum Ptr {
-                            U8(*mut u8),
-                            U16(*mut u16),
-                            U32(*mut u32)
-                        }
-                        impl Ptr {
-                            unsafe fn offset(self, i: isize) -> Ptr {
-                                match self {
-                                    Ptr::U8(ptr)  => Ptr::U8(ptr.offset(i)),
-                                    Ptr::U16(ptr) => Ptr::U16(ptr.offset(i)),
-                                    Ptr::U32(ptr) => Ptr::U32(ptr.offset(i)),
-                                }
-                            }
-                            unsafe fn deref_u64(self) -> u64 {
-                                match self {
-                                    Ptr::U8(ptr)  => *ptr as u64,
-                                    Ptr::U16(ptr) => *ptr as u64,
-                                    Ptr::U32(ptr) => *ptr as u64,
-                                }
-                            }
-                        }
-
-                        let data_enum = match actual_format {
-                            8  => Some(Ptr::U8(data)),
-                            16 => Some(Ptr::U16(data as *mut u16)),
-                            32 => Some(Ptr::U32(data as *mut u32)),
-                            _  => None
-                        };
-
-                        let atom = XInternAtom(
-                            self.display,
-                            NET_WM_STATE_FULLSCREEN.as_ptr() as *const c_char,
-                            0
-                        );
-
-                        for i in 0..nitems as isize {
-                            if data_enum.unwrap().offset(i).deref_u64() == atom {
-                                fullscreen = true;
-                                break;
-                            }
-                        }
-
-                        XFree(data as *mut c_void);
-
-                        fullscreen
-                    }
-                });
+        if self.ran_notify && !self.ran_timer {
+            // In case the user goes back from being idle between the notify and timer
+            if let Some(canceller) = self.canceller.as_ref() {
+                invoke(canceller);
             }
-            if !self.not_when_fullscreen || !self.fullscreen.unwrap() {
-                if self.notify.is_some() && !self.ran_notify {
-                    invoke(self.notifier.as_ref().unwrap());
-
-                    self.ran_notify = true;
-                    self.delay = Duration::from_secs(1);
-
-                    // Since the delay is usually a minute, I could've exceeded both the notify and the timer.
-                    // The simple solution is to change the timer to a point where it's guaranteed
-                    // it's been _ seconds since the notifier.
-                    self.time_new = idle + self.notify.unwrap();
-                } else if idle >= self.time_new && !self.ran_timer {
-                    self.trigger();
-
-                    if self.once {
-                        return Some(Ok(()));
-                    }
-
-                    self.ran_timer = true;
-                    self.delay = default_delay;
-                }
-            }
-        } else {
-            if self.ran_notify && !self.ran_timer {
-                // In case the user goes back from being idle between the notify and timer
-                if let Some(canceller) = self.canceller.as_ref() {
-                    invoke(canceller);
-                }
-            }
-            self.delay = default_delay;
-            self.ran_notify = false;
-            self.ran_timer  = false;
-            self.fullscreen = None;
         }
 
-        None
+        self.delay = default_delay;
+        self.fullscreen = None;
+        self.ran_notify = false;
+        self.ran_timer  = false;
+        self.time_new = self.time;
     }
-    fn trigger(&self) {
-        invoke(&self.timer);
-    }
-}
-fn get_idle(display: *mut Display, info: *mut XScreenSaverInfo) -> Result<u64, Error> {
-    if unsafe { XScreenSaverQueryInfo(display, XDefaultRootWindow(display), info) } == 0 {
-        bail!("failed to query screen saver info");
-    }
+    fn step(&mut self) -> Result<bool, Error> {
+        let active = self.active && !self.audio;
 
-    Ok(unsafe { (*info).idle })
-}
-fn invoke(cmd: &str) {
-    if let Err(err) =
-        Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .status() {
-        eprintln!("warning: failed to invoke command: {}", err);
+        if !active {
+            self.reset();
+            return Ok(true);
+        }
+
+        // Idle time is in milliseconds, we want seconds
+        let idle = x11api::get_idle(self.display, self.info)? / 1000;
+
+        if self.notify.map(|notify| idle + notify < self.time).unwrap_or(idle < self.time) {
+            // We're in before any notifier or timer, let's reset and continue
+            self.reset();
+            return Ok(true);
+        }
+
+        if self.not_when_fullscreen && self.fullscreen.is_none() {
+            // We haven't cached a fullscreen status, let's fetch one
+            self.fullscreen = Some(match unsafe { x11api::get_fullscreen(self.display) } {
+                Ok(value) => value,
+                Err(err) => {
+                    eprintln!("warning: {}", err);
+                    false
+                }
+            });
+        }
+        if !self.not_when_fullscreen || !self.fullscreen.unwrap() {
+            if self.notify.is_some() && !self.ran_notify {
+                invoke(self.notifier.as_ref().unwrap());
+
+                self.ran_notify = true;
+                self.delay = Duration::from_secs(1);
+
+                // Since the delay is usually a minute, I could've exceeded both the notify and the timer.
+                // The simple solution is to change the timer to a point where it's guaranteed
+                // it's been _ seconds since the notifier.
+                self.time_new = idle + self.notify.unwrap();
+            } else if idle >= self.time_new && !self.ran_timer {
+                self.trigger();
+
+                if self.once {
+                    // false = exit
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
     }
 }
