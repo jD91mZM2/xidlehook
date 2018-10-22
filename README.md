@@ -14,7 +14,6 @@ Improvements over xautolock:
 
 Missing features:
  - Magic corners.
- - --killer stuff whatever that is.
  - Bell, because you should be using --notify.
  - All the instance related stuff (you should use unix sockets with --socket).
 

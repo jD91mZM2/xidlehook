@@ -22,6 +22,7 @@ use std::{
     collections::HashMap,
     fs,
     io::{self, prelude::*},
+    mem,
     os::{
         raw::c_void,
         unix::{
@@ -89,22 +90,32 @@ fn main() -> Result<(), Error> {
         )
         .arg(
             Arg::with_name("not-when-fullscreen")
-                .help("Don't invoke the timer when the current application is fullscreen. \
-                       Useful for preventing the lockscreen when watching videos")
+                .long_help("\
+                    Don't invoke the timer when the current application is \
+                    fullscreen. Useful for preventing a lockscreen when \
+                    watching videos. \
+                ")
                 .long("not-when-fullscreen")
                 .conflicts_with("print")
         )
         .arg(
             Arg::with_name("once")
-                .help("Exit after timer command has been invoked once. \
-                       This does not include manual invoking using the socket.")
+                .long_help("\
+                    Exit after timer command has been invoked once. \
+                    This does not include manual invoking using the socket. \
+                ")
                 .long("once")
                 .conflicts_with("print")
         )
         // Options
         .arg(
             Arg::with_name("time")
-                .help("Set the required amount of idle minutes before invoking timer")
+                .long_help("\
+                    Set the required amount of idle time before invoking timer. \
+                    The time is specified in minutes. The timer may be anything \
+                    within an entire minute late, because xidlehook prefers to \
+                    sleep for long durations of time. \
+                ")
                 .long("time")
                 .takes_value(true)
                 .required_unless("print")
@@ -112,7 +123,7 @@ fn main() -> Result<(), Error> {
         )
         .arg(
             Arg::with_name("timer")
-                .help("Set command to run when the timer goes off")
+                .help("Set command to run when the timer goes off (see --time)")
                 .long("timer")
                 .takes_value(true)
                 .required_unless("print")
@@ -120,7 +131,13 @@ fn main() -> Result<(), Error> {
         )
         .arg(
             Arg::with_name("notify")
-                .help("Run the command passed by --notifier _ seconds before timer goes off")
+                .long_help("\
+                    A notifier command is run the specified amount of time \
+                    before the timer is invoked. The time is specified in \
+                    seconds. Since the timer may be late, it is delayed further \
+                    to guarantee that the notifier has been shown for at least \
+                    this duration. \
+                ")
                 .long("notify")
                 .takes_value(true)
                 .requires("notifier")
@@ -136,15 +153,48 @@ fn main() -> Result<(), Error> {
         )
         .arg(
             Arg::with_name("canceller")
-                .help("Set the command to run when user cancels the timer after the notifier has already gone off")
+                .long_help("\
+                    Set the command to run when the user stops being idle after \
+                    a notifier has gone off but before the timer did. Upon a \
+                    successful timer invocation, the canceller is not invoked. \
+               ")
                 .long("canceller")
                 .takes_value(true)
                 .requires("notify")
                 .conflicts_with("print")
         )
         .arg(
+            Arg::with_name("time2")
+                .long_help("\
+                    When the first timer has gone off, wait this amount of time \
+                    before executing the second timer. The time is specified in \
+                    minutes. An example of this would be to automatically \
+                    suspend the computer 10 minutes after the lockscreen was \
+                    started. Then the first timer would be the lockscreen and \
+                    the second timer would be the suspending. \
+                ")
+                .long("time2")
+                .takes_value(true)
+                .requires("timer2")
+                .conflicts_with("print")
+        )
+        .arg(
+            Arg::with_name("timer2")
+                .help("Set command to run when the second timer goes off (see --time2)")
+                .long("timer2")
+                .takes_value(true)
+                .requires("time2")
+                .conflicts_with("print")
+        )
+        .arg(
             Arg::with_name("socket")
-                .help("Listen to events over a unix socket")
+                .long_help("\
+                    Listen to events over a specified unix socket.\n\
+                    Events are as following:\n\
+                    \t0x0 - Disable xidlehook\n\
+                    \t0x1 - Re-enable xidlehook\n\
+                    \t0x2 - Trigger the timer immediately\n\
+                ")
                 .long("socket")
                 .takes_value(true)
                 .conflicts_with("print")
@@ -192,25 +242,30 @@ fn main() -> Result<(), Error> {
 
     let time = value_t!(matches, "time", u32).unwrap_or_else(|err| err.exit()) as u64 * SCALE;
     let mut app = App {
-        active: true,
-        audio: false,
-        delay: Duration::from_secs(SCALE),
-
+        // Data
         display,
         info,
 
+        // Flags
         not_when_fullscreen: matches.is_present("not-when-fullscreen"),
         once: matches.is_present("once"),
         time,
         timer: matches.value_of("timer").unwrap().to_string(),
-        notify: value_t!(matches, "notify", u32).ok().map(|notify| notify as u64),
+        notify: value_t!(matches, "notify", u32).ok().map(u64::from),
         notifier: matches.value_of("notifier").map(String::from),
         canceller: matches.value_of("canceller").map(String::from),
+        time2: value_t!(matches, "time2", u32).ok().map(u64::from),
+        timer2: matches.value_of("timer2").map(String::from),
 
+        // State
+        active: true,
+        audio: false,
+        delay: Duration::from_secs(SCALE),
+        state: State::Waiting,
+
+        // Temporary state
+        last_idle: None,
         time_new: time,
-        ran_notify: false,
-        ran_timer:  false,
-
         fullscreen: None
     };
 
@@ -288,7 +343,18 @@ fn main() -> Result<(), Error> {
                         Some(_) => match byte[0] {
                             COMMAND_DEACTIVATE => app.active = false,
                             COMMAND_ACTIVATE => app.active = true,
-                            COMMAND_TRIGGER => app.trigger(),
+                            COMMAND_TRIGGER => if app.state < State::Invoked {
+                                app.trigger();
+
+                                match x11api::get_idle(app.display, app.info) {
+                                    Ok(idle) => app.time_new = idle / 1000,
+                                    Err(err) => eprintln!("couldn't get idle time: {}", err)
+                                }
+
+                                if app.once && app.time2.is_none() {
+                                    break 'main;
+                                }
+                            },
                             byte => eprintln!("socket: unknown command: {}", byte)
                         }
                     }
@@ -316,18 +382,23 @@ fn invoke(cmd: &str) {
         Command::new("sh")
             .arg("-c")
             .arg(cmd)
-            .status() {
+            .spawn() {
         eprintln!("warning: failed to invoke command: {}", err);
     }
 }
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum State {
+    Waiting,
+    Notified,
+    Invoked,
+    Invoked2
+}
 struct App {
-    active: bool,
-    audio: bool,
-    delay: Duration,
-
+    // Data
     display: *mut Display,
     info: *mut XScreenSaverInfo,
 
+    // Flags
     not_when_fullscreen: bool,
     once: bool,
     time: u64,
@@ -335,25 +406,31 @@ struct App {
     notify: Option<u64>,
     notifier: Option<String>,
     canceller: Option<String>,
+    time2: Option<u64>,
+    timer2: Option<String>,
 
+    // State
+    active: bool,
+    audio: bool,
+    delay: Duration,
+    state: State,
+
+    // Temporary state
+    last_idle: Option<u64>,
     time_new: u64,
-    ran_notify: bool,
-    ran_timer: bool,
-
     fullscreen: Option<bool>
 }
 impl App {
     fn trigger(&mut self) {
         invoke(&self.timer);
 
-        self.ran_notify = true;
-        self.ran_timer = true;
+        self.state = State::Invoked;
         self.delay = Duration::from_secs(SCALE); // TODO: const fn;
     }
     fn reset(&mut self) {
         let default_delay = Duration::from_secs(SCALE); // TODO: const fn
 
-        if self.ran_notify && !self.ran_timer {
+        if self.state == State::Notified {
             // In case the user goes back from being idle between the notify and timer
             if let Some(canceller) = self.canceller.as_ref() {
                 invoke(canceller);
@@ -362,8 +439,7 @@ impl App {
 
         self.delay = default_delay;
         self.fullscreen = None;
-        self.ran_notify = false;
-        self.ran_timer  = false;
+        self.state = State::Waiting;
         self.time_new = self.time;
     }
     fn step(&mut self) -> Result<bool, Error> {
@@ -374,12 +450,18 @@ impl App {
             return Ok(true);
         }
 
-        // Idle time is in milliseconds, we want seconds
-        let idle = x11api::get_idle(self.display, self.info)? / 1000;
-
-        if self.notify.map(|notify| idle + notify < self.time).unwrap_or(idle < self.time) {
-            // We're in before any notifier or timer, let's reset and continue
+        let idle = x11api::get_idle(self.display, self.info)?;
+        let last_idle = mem::replace(&mut self.last_idle, Some(idle));
+        if last_idle.map(|last| idle < last).unwrap_or(false) {
+            // Mouse must have moved, idle time is less than previous
             self.reset();
+            return Ok(true)
+        }
+        let idle = idle / 1000; // millis to seconds
+
+        if self.state < State::Notified &&
+                self.notify.map(|notify| idle + notify < self.time).unwrap_or(idle < self.time) {
+            // We're in before any notifier or timer, do nothing
             return Ok(true);
         }
 
@@ -393,24 +475,34 @@ impl App {
                 }
             });
         }
-        if !self.not_when_fullscreen || !self.fullscreen.unwrap() {
-            if self.notify.is_some() && !self.ran_notify {
-                invoke(self.notifier.as_ref().unwrap());
+        if self.not_when_fullscreen && self.fullscreen.unwrap() {
+            // Something is (or was) fullscreen, do nothing
+            return Ok(true);
+        }
+        if self.state < State::Notified && self.notify.is_some() {
+            invoke(self.notifier.as_ref().unwrap());
 
-                self.ran_notify = true;
-                self.delay = Duration::from_secs(1);
+            self.state = State::Notified;
+            self.delay = Duration::from_secs(1);
 
-                // Since the delay is usually a minute, I could've exceeded both the notify and the timer.
-                // The simple solution is to change the timer to a point where it's guaranteed
-                // it's been _ seconds since the notifier.
-                self.time_new = idle + self.notify.unwrap();
-            } else if idle >= self.time_new && !self.ran_timer {
-                self.trigger();
+            // Since the delay is usually a minute, I could've exceeded both the notify and the timer.
+            // The simple solution is to change the timer to a point where it's guaranteed
+            // it's been _ seconds since the notifier.
+            self.time_new = idle + self.notify.unwrap();
+        } else if self.state < State::Invoked && idle >= self.time_new {
+            self.trigger();
 
-                if self.once {
-                    // false = exit
-                    return Ok(false);
-                }
+            if self.once && self.time2.is_none() {
+                return Ok(false); // exit
+            }
+        } else if self.state == State::Invoked &&
+                self.time2.map(|time2| idle >= self.time_new + time2).unwrap_or(false) {
+            invoke(self.timer2.as_ref().unwrap());
+
+            self.state = State::Invoked2;
+
+            if self.once {
+                return Ok(false); // exit
             }
         }
         Ok(true)
