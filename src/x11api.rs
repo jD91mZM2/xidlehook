@@ -14,7 +14,7 @@ pub fn get_idle(display: *mut Display, info: *mut XScreenSaverInfo) -> Result<u6
         bail!("failed to query screen saver info");
     }
 
-    Ok(unsafe { (*info).idle })
+    Ok(unsafe { (*info).idle / 1000 })
 }
 
 #[derive(Clone, Copy, Debug)]
