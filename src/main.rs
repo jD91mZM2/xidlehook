@@ -106,9 +106,7 @@ fn main() -> Result<(), Error> {
         .arg(
             Arg::with_name("timer")
                 .long_help("\
-                    Pass the following arguments:\n\
-                    <\"normal\"/\"primary\"> <duration> <command> <canceller>
-                    \n\n\
+                    Mode can be either \"normal\" or \"primary\". \
                     If the timer is specified as primary it's the timer chosen \
                     to be triggered by the socket. Only one timer may be \
                     specified as primary. \
@@ -125,7 +123,7 @@ fn main() -> Result<(), Error> {
                 ")
                 .long("timer")
                 .takes_value(true)
-                .number_of_values(4)
+                .value_names(&["mode", "duration", "command", "canceller"])
                 .multiple(true)
                 .required_unless("print")
                 .conflicts_with("print")
