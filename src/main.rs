@@ -5,10 +5,6 @@
 extern crate mio;
 extern crate x11;
 
-#[cfg(feature = "pulse")] mod pulse;
-mod x11api;
-
-#[cfg(feature = "pulse")] use pulse::PulseAudio;
 #[cfg(feature = "pulse")] use std::sync::mpsc;
 use clap::{App as ClapApp, Arg};
 use failure::Error;
@@ -24,7 +20,6 @@ use std::{
     io::{self, prelude::*},
     mem,
     os::{
-        raw::c_void,
         unix::{
             io::AsRawFd,
             net::UnixListener
@@ -32,26 +27,28 @@ use std::{
     },
     path::Path,
     process::Command,
-    ptr,
     time::Duration
 };
-use x11::{
-    xlib::{Display, XCloseDisplay, XFree, XOpenDisplay},
-    xss::{XScreenSaverAllocInfo, XScreenSaverInfo}
-};
+use x11::xss::{XScreenSaverAllocInfo, XScreenSaverInfo};
 
-struct DeferXClose(*mut Display);
-impl Drop for DeferXClose {
-    fn drop(&mut self) {
-        unsafe { XCloseDisplay(self.0); }
-    }
+#[cfg(feature = "pulse")] mod pulse;
+mod x11api;
+
+#[cfg(feature = "pulse")] use pulse::PulseAudio;
+use x11api::{XDisplay, XPtr};
+
+#[derive(Debug, Fail)]
+pub enum MyError {
+    #[fail(display = "failed to open x display")]
+    XDisplay,
+    #[fail(display = "failed to query x for input focus")]
+    XGetInputFocus,
+    #[fail(display = "failed to query x for window properties")]
+    XGetWindowProperty,
+    #[fail(display = "failed to query for screen saver info")]
+    XScreenSaver
 }
-struct DeferXFree(*mut c_void);
-impl Drop for DeferXFree {
-    fn drop(&mut self) {
-        unsafe { XFree(self.0); }
-    }
-}
+
 struct DeferRemove<T: AsRef<Path>>(T);
 impl<T: AsRef<Path>> Drop for DeferRemove<T> {
     fn drop(&mut self) {
@@ -159,14 +156,9 @@ fn main() -> Result<(), Error> {
     }
     let matches = clap_app.get_matches();
 
-    let display = unsafe { XOpenDisplay(ptr::null()) };
-    if display.is_null() {
-        bail!("failed to open x server");
-    }
-    let _cleanup = DeferXClose(display);
+    let display = XDisplay::new()?;
 
-    let info = unsafe { XScreenSaverAllocInfo() };
-    let _cleanup = DeferXFree(info as *mut c_void);
+    let info = unsafe { XPtr::new(XScreenSaverAllocInfo()) };
 
     if matches.is_present("print") {
         return Ok(());
@@ -284,8 +276,9 @@ fn main() -> Result<(), Error> {
             1
         } else if let Some(duration) = app.next().map(|t| t.duration) {
             // Sleep for how much of the duration is left
-            let idle = x11api::get_idle(app.display, app.info)?;
+            let idle = app.last_idle.map(Ok).unwrap_or_else(|| x11api::get_idle(*app.display, *app.info))?;
             duration.saturating_sub(idle.saturating_sub(app.base))
+                .min(app.timers.first().unwrap().duration)
         } else {
             // Sleep for as long as the first duration, as it's going to reset
             // when they wake up
@@ -374,8 +367,8 @@ struct Timer {
 }
 struct App {
     // Data
-    display: *mut Display,
-    info: *mut XScreenSaverInfo,
+    display: XDisplay,
+    info: XPtr<XScreenSaverInfo>,
 
     // Flags
     not_when_fullscreen: bool,
@@ -417,7 +410,7 @@ impl App {
             return Ok(true);
         }
 
-        let idle = x11api::get_idle(self.display, self.info)?;
+        let idle = x11api::get_idle(*self.display, *self.info)?;
         let last_idle = mem::replace(&mut self.last_idle, Some(idle));
         if last_idle.map(|last| idle < last).unwrap_or(false) {
             // Mouse must have moved, idle time is less than previous
@@ -437,7 +430,7 @@ impl App {
 
         if self.not_when_fullscreen && self.fullscreen.is_none() {
             // We haven't cached a fullscreen status, let's fetch one
-            self.fullscreen = Some(match unsafe { x11api::get_fullscreen(self.display) } {
+            self.fullscreen = Some(match unsafe { x11api::get_fullscreen(*self.display) } {
                 Ok(value) => value,
                 Err(err) => {
                     eprintln!("warning: {}", err);
@@ -452,8 +445,8 @@ impl App {
 
         let timer = &self.timers[self.index];
         invoke(&timer.command);
+        self.base += timer.duration;
         self.index += 1;
-        self.base = idle;
 
         if self.once && self.index >= self.timers.len() {
             // false = exit

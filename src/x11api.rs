@@ -1,45 +1,120 @@
-use failure::Error;
-use std::{ptr, os::raw::{c_char, c_void}};
+use crate::MyError;
+
+use std::{
+    ops::{Deref, DerefMut},
+    os::raw::{c_char, c_void},
+    ptr
+};
 use x11::{
-    xlib::{Display, XA_ATOM, XDefaultRootWindow, XFree, XGetInputFocus, XGetWindowProperty,
-           XInternAtom},
+    xlib::{Display, XA_ATOM, XCloseDisplay, XDefaultRootWindow, XFree, XGetInputFocus, XGetWindowProperty,
+           XInternAtom, XOpenDisplay},
     xss::{XScreenSaverInfo, XScreenSaverQueryInfo}
 };
 
 const NET_WM_STATE: &str = "_NET_WM_STATE\0";
 const NET_WM_STATE_FULLSCREEN: &str = "_NET_WM_STATE_FULLSCREEN\0";
 
-pub fn get_idle(display: *mut Display, info: *mut XScreenSaverInfo) -> Result<u64, Error> {
-    if unsafe { XScreenSaverQueryInfo(display, XDefaultRootWindow(display), info) } == 0 {
-        bail!("failed to query screen saver info");
+pub fn get_idle(display: *mut Display, info: *mut XScreenSaverInfo) -> Result<u64, MyError> {
+    unsafe {
+        if XScreenSaverQueryInfo(display, XDefaultRootWindow(display), info) == 0 {
+            Err(MyError::XScreenSaver)
+        } else {
+            Ok((*info).idle / 1000)
+        }
     }
-
-    Ok(unsafe { (*info).idle / 1000 })
 }
 
-#[derive(Clone, Copy, Debug)]
-enum Ptr {
+pub struct XDisplay(*mut Display);
+impl XDisplay {
+    pub fn new() -> Result<Self, MyError> {
+        unsafe {
+            let ptr = XOpenDisplay(ptr::null());
+            if ptr.is_null() {
+                Err(MyError::XDisplay)
+            } else {
+                Ok(XDisplay(ptr))
+            }
+        }
+    }
+}
+impl Deref for XDisplay {
+    type Target = *mut Display;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl DerefMut for XDisplay {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+impl Drop for XDisplay {
+    fn drop(&mut self) {
+        unsafe {
+            XCloseDisplay(self.0);
+        }
+    }
+}
+
+pub struct XPtr<T>(*mut T);
+impl<T> XPtr<T> {
+    pub unsafe fn new(ptr: *mut T) -> Self {
+        XPtr(ptr)
+    }
+}
+impl<T> Deref for XPtr<T> {
+    type Target = *mut T;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl<T> DerefMut for XPtr<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+impl<T> Drop for XPtr<T> {
+    fn drop(&mut self) {
+        unsafe {
+            XFree(self.0 as *mut c_void);
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+enum XIntPtr {
     U8(*mut u8),
     U16(*mut u16),
     U32(*mut u32)
 }
-impl Ptr {
-    unsafe fn offset(self, i: isize) -> Ptr {
-        match self {
-            Ptr::U8(ptr)  => Ptr::U8(ptr.offset(i)),
-            Ptr::U16(ptr) => Ptr::U16(ptr.offset(i)),
-            Ptr::U32(ptr) => Ptr::U32(ptr.offset(i)),
+impl XIntPtr {
+    unsafe fn offset(&self, i: isize) -> XIntPtr {
+        match *self {
+            XIntPtr::U8(ptr)  => XIntPtr::U8(ptr.offset(i)),
+            XIntPtr::U16(ptr) => XIntPtr::U16(ptr.offset(i)),
+            XIntPtr::U32(ptr) => XIntPtr::U32(ptr.offset(i)),
         }
     }
-    unsafe fn deref_u64(self) -> u64 {
-        match self {
-            Ptr::U8(ptr)  => *ptr as u64,
-            Ptr::U16(ptr) => *ptr as u64,
-            Ptr::U32(ptr) => *ptr as u64,
+    unsafe fn deref_u64(&self) -> u64 {
+        match *self {
+            XIntPtr::U8(ptr)  => *ptr as u64,
+            XIntPtr::U16(ptr) => *ptr as u64,
+            XIntPtr::U32(ptr) => *ptr as u64,
         }
     }
 }
-pub unsafe fn get_fullscreen(display: *mut Display) -> Result<bool, Error> {
+impl Drop for XIntPtr {
+    fn drop(&mut self) {
+        unsafe {
+            XFree(match *self {
+                XIntPtr::U8(ptr) => ptr as *mut c_void,
+                XIntPtr::U16(ptr) => ptr as *mut c_void,
+                XIntPtr::U32(ptr) => ptr as *mut c_void
+            });
+        }
+    }
+}
+pub unsafe fn get_fullscreen(display: *mut Display) -> Result<bool, MyError> {
     let mut focus = 0u64;
     let mut revert = 0i32;
 
@@ -51,7 +126,7 @@ pub unsafe fn get_fullscreen(display: *mut Display) -> Result<bool, Error> {
 
     // Get the focused window
     if XGetInputFocus(display, &mut focus, &mut revert) != 0 {
-        bail!("failed to get input focus");
+        return Err(MyError::XGetInputFocus);
     }
 
     // Get the window properties of said window
@@ -69,15 +144,15 @@ pub unsafe fn get_fullscreen(display: *mut Display) -> Result<bool, Error> {
         &mut bytes,
         &mut data
     ) != 0 {
-        bail!("failed to get window property");
+        return Err(MyError::XGetWindowProperty);
     }
 
     let mut fullscreen = false;
 
-    let data_enum = match actual_format {
-        8  => Some(Ptr::U8(data)),
-        16 => Some(Ptr::U16(data as *mut u16)),
-        32 => Some(Ptr::U32(data as *mut u32)),
+    let data = match actual_format {
+        8  => Some(XIntPtr::U8(data)),
+        16 => Some(XIntPtr::U16(data as *mut u16)),
+        32 => Some(XIntPtr::U32(data as *mut u32)),
         _  => None
     };
 
@@ -89,13 +164,11 @@ pub unsafe fn get_fullscreen(display: *mut Display) -> Result<bool, Error> {
 
     // Check the list of returned items for _NET_WM_STATE_FULLSCREEN
     for i in 0..nitems as isize {
-        if data_enum.unwrap().offset(i).deref_u64() == atom {
+        if data.as_ref().unwrap().offset(i).deref_u64() == atom {
             fullscreen = true;
             break;
         }
     }
-
-    XFree(data as *mut c_void);
 
     Ok(fullscreen)
 }
