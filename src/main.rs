@@ -319,13 +319,11 @@ fn main() -> Result<(), Error> {
                             COMMAND_DEACTIVATE => app.active = false,
                             COMMAND_ACTIVATE => app.active = true,
                             COMMAND_TRIGGER => if let Some(primary) = primary {
-                                if app.index <= primary {
-                                    invoke(&app.timers[primary].command);
-                                    app.index = primary + 1;
+                                invoke(&app.timers[primary].command);
+                                app.index = primary + 1;
 
-                                    if app.once && app.index >= app.timers.len() {
-                                        break 'main;
-                                    }
+                                if app.once && app.index >= app.timers.len() {
+                                    break 'main;
                                 }
                             },
                             byte => eprintln!("socket: unknown command: {}", byte)
