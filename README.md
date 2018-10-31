@@ -2,13 +2,11 @@
 
 *Because xautolock is annoying to work with.*
 
-xidlehook is a general-purpose replacement for xautolock. It basically just
-executes a command when the computer has been idle for a specified amount of
-seconds.
+xidlehook is a general-purpose replacement for xautolock. It executes a command
+when the computer has been idle for a specified amount of time.
 
 Improvements over xautolock:
- - There's an optional canceller, for example used to undim the screen when the
-   user moves the mouse
+ - Allows "cancellers" which undo a timer action when new activity is detected.
  - Not specific to locking. Multiple instances can run at the same time.
  - Optionally only run once.
  - Optionally prevent locking when an application is fullscreen.
