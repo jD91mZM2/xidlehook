@@ -5,10 +5,6 @@
 extern crate mio;
 extern crate x11;
 
-#[cfg(feature = "pulse")] mod pulse;
-mod x11api;
-
-#[cfg(feature = "pulse")] use pulse::PulseAudio;
 #[cfg(feature = "pulse")] use std::sync::mpsc;
 use clap::{App as ClapApp, Arg};
 use failure::Error;
@@ -24,7 +20,6 @@ use std::{
     io::{self, prelude::*},
     mem,
     os::{
-        raw::c_void,
         unix::{
             io::AsRawFd,
             net::UnixListener
@@ -32,34 +27,34 @@ use std::{
     },
     path::Path,
     process::Command,
-    ptr,
     time::Duration
 };
-use x11::{
-    xlib::{Display, XCloseDisplay, XFree, XOpenDisplay},
-    xss::{XScreenSaverAllocInfo, XScreenSaverInfo}
-};
+use x11::xss::{XScreenSaverAllocInfo, XScreenSaverInfo};
 
-struct DeferXClose(*mut Display);
-impl Drop for DeferXClose {
-    fn drop(&mut self) {
-        unsafe { XCloseDisplay(self.0); }
-    }
+#[cfg(feature = "pulse")] mod pulse;
+mod x11api;
+
+#[cfg(feature = "pulse")] use pulse::PulseAudio;
+use x11api::{XDisplay, XPtr};
+
+#[derive(Debug, Fail)]
+pub enum MyError {
+    #[fail(display = "failed to open x display")]
+    XDisplay,
+    #[fail(display = "failed to query x for input focus")]
+    XGetInputFocus,
+    #[fail(display = "failed to query x for window properties")]
+    XGetWindowProperty,
+    #[fail(display = "failed to query for screen saver info")]
+    XScreenSaver
 }
-struct DeferXFree(*mut c_void);
-impl Drop for DeferXFree {
-    fn drop(&mut self) {
-        unsafe { XFree(self.0); }
-    }
-}
+
 struct DeferRemove<T: AsRef<Path>>(T);
 impl<T: AsRef<Path>> Drop for DeferRemove<T> {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.0);
     }
 }
-
-const SCALE: u64 = 60; // Second:minute scale. Can be changed for debugging purposes.
 
 const COMMAND_DEACTIVATE: u8 = 0;
 const COMMAND_ACTIVATE:   u8 = 1;
@@ -109,81 +104,28 @@ fn main() -> Result<(), Error> {
         )
         // Options
         .arg(
-            Arg::with_name("time")
-                .long_help("\
-                    Set the required amount of idle time before invoking timer. \
-                    The time is specified in minutes. The timer may be anything \
-                    within an entire minute late, because xidlehook prefers to \
-                    sleep for long durations of time. \
-                ")
-                .long("time")
-                .takes_value(true)
-                .required_unless("print")
-                .conflicts_with("print")
-        )
-        .arg(
             Arg::with_name("timer")
-                .help("Set command to run when the timer goes off (see --time)")
+                .long_help("\
+                    Mode can be either \"normal\" or \"primary\". \
+                    If the timer is specified as primary it's the timer chosen \
+                    to be triggered by the socket. Only one timer may be \
+                    specified as primary. \
+                    \n\n\
+                    The duration is the number of seconds of inactivity which \
+                    should trigger this timer. \
+                    \n\n\
+                    The command is what is invoked when the idle duration is \
+                    reached. It's passed through \"sh -c\". \
+                    \n\n\
+                    The canceller is what is invoked when the user becomes \
+                    active after the timer has gone off, but before the next \
+                    timer (if any). Pass an empty string to not have one. \
+                ")
                 .long("timer")
                 .takes_value(true)
+                .value_names(&["mode", "duration", "command", "canceller"])
+                .multiple(true)
                 .required_unless("print")
-                .conflicts_with("print")
-        )
-        .arg(
-            Arg::with_name("notify")
-                .long_help("\
-                    A notifier command is run the specified amount of time \
-                    before the timer is invoked. The time is specified in \
-                    seconds. Since the timer may be late, it is delayed further \
-                    to guarantee that the notifier has been shown for at least \
-                    this duration. \
-                ")
-                .long("notify")
-                .takes_value(true)
-                .requires("notifier")
-                .conflicts_with("print")
-        )
-        .arg(
-            Arg::with_name("notifier")
-                .help("Set the command to run when notifier goes off (see --notify)")
-                .long("notifier")
-                .takes_value(true)
-                .requires("notify")
-                .conflicts_with("print")
-        )
-        .arg(
-            Arg::with_name("canceller")
-                .long_help("\
-                    Set the command to run when the user stops being idle after \
-                    a notifier has gone off but before the timer did. Upon a \
-                    successful timer invocation, the canceller is not invoked. \
-               ")
-                .long("canceller")
-                .takes_value(true)
-                .requires("notify")
-                .conflicts_with("print")
-        )
-        .arg(
-            Arg::with_name("time2")
-                .long_help("\
-                    When the first timer has gone off, wait this amount of time \
-                    before executing the second timer. The time is specified in \
-                    minutes. An example of this would be to automatically \
-                    suspend the computer 10 minutes after the lockscreen was \
-                    started. Then the first timer would be the lockscreen and \
-                    the second timer would be the suspending. \
-                ")
-                .long("time2")
-                .takes_value(true)
-                .requires("timer2")
-                .conflicts_with("print")
-        )
-        .arg(
-            Arg::with_name("timer2")
-                .help("Set command to run when the second timer goes off (see --time2)")
-                .long("timer2")
-                .takes_value(true)
-                .requires("time2")
                 .conflicts_with("print")
         )
         .arg(
@@ -212,17 +154,11 @@ fn main() -> Result<(), Error> {
     }
     let matches = clap_app.get_matches();
 
-    let display = unsafe { XOpenDisplay(ptr::null()) };
-    if display.is_null() {
-        bail!("failed to open x server");
-    }
-    let _cleanup = DeferXClose(display);
+    let display = XDisplay::new()?;
 
-    let info = unsafe { XScreenSaverAllocInfo() };
-    let _cleanup = DeferXFree(info as *mut c_void);
+    let info = unsafe { XPtr::new(XScreenSaverAllocInfo()) };
 
     if matches.is_present("print") {
-        println!("{}", x11api::get_idle(display, info)?);
         return Ok(());
     }
 
@@ -239,8 +175,40 @@ fn main() -> Result<(), Error> {
         SignalFd::with_flags(&mask, SfdFlags::SFD_NONBLOCK)?
     };
 
+    let mut timers = Vec::new();
+    let mut primary = None;
+    if let Some(iter) = matches.values_of("timer") {
+        let mut iter = iter.peekable();
+        while iter.peek().is_some() {
+            // clap will ensure there are always a multiple of 4
+            match iter.next().unwrap() {
+                "normal" => (),
+                "primary" => if primary.is_none() {
+                    primary = Some(timers.len())
+                } else {
+                    eprintln!("error: more than one primary timer specified");
+                    return Ok(());
+                },
+                mode => {
+                    eprintln!("error: invalid mode specified. {:?} is neither \"normal\" nor \"primary\"", mode);
+                    return Ok(());
+                }
+            }
+            let duration = match iter.next().unwrap().parse() {
+                Ok(duration) => duration,
+                Err(err) => {
+                    eprintln!("error: failed to parse duration as number: {}", err);
+                    return Ok(());
+                }
+            };
+            timers.push(Timer {
+                duration,
+                command: iter.next().unwrap().to_string(),
+                canceller: iter.next().filter(|s| !s.is_empty()).map(String::from)
+            });
+        }
+    }
 
-    let time = value_t!(matches, "time", u32).unwrap_or_else(|err| err.exit()) as u64 * SCALE;
     let mut app = App {
         // Data
         display,
@@ -249,23 +217,16 @@ fn main() -> Result<(), Error> {
         // Flags
         not_when_fullscreen: matches.is_present("not-when-fullscreen"),
         once: matches.is_present("once"),
-        time,
-        timer: matches.value_of("timer").unwrap().to_string(),
-        notify: value_t!(matches, "notify", u32).ok().map(u64::from),
-        notifier: matches.value_of("notifier").map(String::from),
-        canceller: matches.value_of("canceller").map(String::from),
-        time2: value_t!(matches, "time2", u32).ok().map(u64::from),
-        timer2: matches.value_of("timer2").map(String::from),
+        timers,
 
         // State
         active: true,
         audio: false,
-        delay: Duration::from_secs(SCALE),
-        state: State::Waiting,
+        next_index: 0,
 
         // Temporary state
         last_idle: None,
-        time_new: time,
+        idle_base: 0,
         fullscreen: None
     };
 
@@ -307,7 +268,21 @@ fn main() -> Result<(), Error> {
     let mut events = Events::with_capacity(1024);
 
     'main: loop {
-        poll.poll(&mut events, Some(app.delay))?;
+        // Wait for as much time as we can guarantee
+        let delay = if app.current().map(|t| t.canceller.is_some()).unwrap_or(false) {
+            // There's a canceller, so we need to check idle time very often
+            1
+        } else if let Some(duration) = app.next().map(|t| t.duration) {
+            // Sleep for how much of the duration is left
+            let idle = app.last_idle.map(Ok).unwrap_or_else(|| x11api::get_idle(*app.display, *app.info))?;
+            duration.saturating_sub(idle.saturating_sub(app.idle_base))
+                .min(app.timers.first().unwrap().duration)
+        } else {
+            // Sleep for as long as the first duration, as it's going to reset
+            // when they wake up
+            app.timers.first().unwrap().duration
+        };
+        poll.poll(&mut events, Some(Duration::from_secs(delay)))?;
 
         for event in &events {
             match event.token() {
@@ -343,22 +318,17 @@ fn main() -> Result<(), Error> {
                         Some(_) => match byte[0] {
                             COMMAND_DEACTIVATE => app.active = false,
                             COMMAND_ACTIVATE => app.active = true,
-                            COMMAND_TRIGGER => if app.state < State::Invoked {
-                                app.trigger();
+                            COMMAND_TRIGGER => if let Some(primary) = primary {
+                                invoke(&app.timers[primary].command);
+                                app.next_index = primary + 1;
 
-                                match x11api::get_idle(app.display, app.info) {
-                                    Ok(idle) => app.time_new = idle / 1000,
-                                    Err(err) => eprintln!("couldn't get idle time: {}", err)
-                                }
-
-                                if app.once && app.time2.is_none() {
+                                if app.once && app.next_index >= app.timers.len() {
                                     break 'main;
                                 }
                             },
                             byte => eprintln!("socket: unknown command: {}", byte)
                         }
                     }
-
                 }
             }
         }
@@ -370,8 +340,7 @@ fn main() -> Result<(), Error> {
             }
         }
 
-        if !app.step()? {
-            // Returning Ok(false) means exiting
+        if app.step()? == Status::Exit {
             break;
         }
     }
@@ -386,88 +355,82 @@ fn invoke(cmd: &str) {
         eprintln!("warning: failed to invoke command: {}", err);
     }
 }
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-enum State {
-    Waiting,
-    Notified,
-    Invoked,
-    Invoked2
+struct Timer {
+    duration: u64,
+    command: String,
+    canceller: Option<String>
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Status {
+    Continue,
+    Exit
 }
 struct App {
     // Data
-    display: *mut Display,
-    info: *mut XScreenSaverInfo,
+    display: XDisplay,
+    info: XPtr<XScreenSaverInfo>,
 
     // Flags
     not_when_fullscreen: bool,
     once: bool,
-    time: u64,
-    timer: String,
-    notify: Option<u64>,
-    notifier: Option<String>,
-    canceller: Option<String>,
-    time2: Option<u64>,
-    timer2: Option<String>,
+    timers: Vec<Timer>,
 
     // State
     active: bool,
     audio: bool,
-    delay: Duration,
-    state: State,
+    next_index: usize,
 
     // Temporary state
     last_idle: Option<u64>,
-    time_new: u64,
+    idle_base: u64,
     fullscreen: Option<bool>
 }
 impl App {
-    fn trigger(&mut self) {
-        invoke(&self.timer);
-
-        self.state = State::Invoked;
-        self.delay = Duration::from_secs(SCALE); // TODO: const fn;
+    fn current(&self) -> Option<&Timer> {
+        self.next_index.checked_sub(1).map(|i| &self.timers[i])
+    }
+    fn next(&self) -> Option<&Timer> {
+        self.timers.get(self.next_index)
     }
     fn reset(&mut self) {
-        let default_delay = Duration::from_secs(SCALE); // TODO: const fn
-
-        if self.state == State::Notified {
-            // In case the user goes back from being idle between the notify and timer
-            if let Some(canceller) = self.canceller.as_ref() {
-                invoke(canceller);
-            }
+        if let Some(canceller) = self.current().and_then(|t| t.canceller.as_ref()) {
+            // In case the user goes back from being idle between two timers
+            invoke(canceller);
         }
 
-        self.delay = default_delay;
         self.fullscreen = None;
-        self.state = State::Waiting;
-        self.time_new = self.time;
+        self.next_index = 0;
+        self.idle_base = 0;
     }
-    fn step(&mut self) -> Result<bool, Error> {
+    fn step(&mut self) -> Result<Status, Error> {
         let active = self.active && !self.audio;
 
         if !active {
             self.reset();
-            return Ok(true);
+            return Ok(Status::Continue);
         }
 
-        let idle = x11api::get_idle(self.display, self.info)?;
+        let idle = x11api::get_idle(*self.display, *self.info)?;
         let last_idle = mem::replace(&mut self.last_idle, Some(idle));
         if last_idle.map(|last| idle < last).unwrap_or(false) {
             // Mouse must have moved, idle time is less than previous
             self.reset();
-            return Ok(true)
+            return Ok(Status::Continue)
         }
-        let idle = idle / 1000; // millis to seconds
 
-        if self.state < State::Notified &&
-                self.notify.map(|notify| idle + notify < self.time).unwrap_or(idle < self.time) {
-            // We're in before any notifier or timer, do nothing
-            return Ok(true);
+        if self.next_index >= self.timers.len() {
+            // We've ran all timers, sit tight
+            return Ok(Status::Continue);
+        }
+
+        if idle < self.idle_base + self.timers[self.next_index].duration {
+            // We're in before any timer
+            return Ok(Status::Continue);
         }
 
         if self.not_when_fullscreen && self.fullscreen.is_none() {
             // We haven't cached a fullscreen status, let's fetch one
-            self.fullscreen = Some(match unsafe { x11api::get_fullscreen(self.display) } {
+            self.fullscreen = Some(match unsafe { x11api::get_fullscreen(*self.display) } {
                 Ok(value) => value,
                 Err(err) => {
                     eprintln!("warning: {}", err);
@@ -477,34 +440,18 @@ impl App {
         }
         if self.not_when_fullscreen && self.fullscreen.unwrap() {
             // Something is (or was) fullscreen, do nothing
-            return Ok(true);
+            return Ok(Status::Continue);
         }
-        if self.state < State::Notified && self.notify.is_some() {
-            invoke(self.notifier.as_ref().unwrap());
 
-            self.state = State::Notified;
-            self.delay = Duration::from_secs(1);
+        let timer = &self.timers[self.next_index];
+        invoke(&timer.command);
+        self.idle_base += timer.duration;
+        self.next_index += 1;
 
-            // Since the delay is usually a minute, I could've exceeded both the notify and the timer.
-            // The simple solution is to change the timer to a point where it's guaranteed
-            // it's been _ seconds since the notifier.
-            self.time_new = idle + self.notify.unwrap();
-        } else if self.state < State::Invoked && idle >= self.time_new {
-            self.trigger();
-
-            if self.once && self.time2.is_none() {
-                return Ok(false); // exit
-            }
-        } else if self.state == State::Invoked &&
-                self.time2.map(|time2| idle >= self.time_new + time2).unwrap_or(false) {
-            invoke(self.timer2.as_ref().unwrap());
-
-            self.state = State::Invoked2;
-
-            if self.once {
-                return Ok(false); // exit
-            }
+        if self.once && self.next_index >= self.timers.len() {
+            return Ok(Status::Exit);
         }
-        Ok(true)
+
+        Ok(Status::Continue)
     }
 }
