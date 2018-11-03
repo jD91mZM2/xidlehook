@@ -204,7 +204,7 @@ fn main() -> Result<(), Error> {
             timers.push(Timer {
                 duration,
                 command: iter.next().unwrap().to_string(),
-                canceller: Some(iter.next().unwrap()).filter(|s| !s.is_empty()).map(String::from)
+                canceller: iter.next().filter(|s| !s.is_empty()).map(String::from)
             });
         }
     }
@@ -222,11 +222,11 @@ fn main() -> Result<(), Error> {
         // State
         active: true,
         audio: false,
-        index: 0,
+        next_index: 0,
 
         // Temporary state
         last_idle: None,
-        base: 0,
+        idle_base: 0,
         fullscreen: None
     };
 
@@ -275,7 +275,7 @@ fn main() -> Result<(), Error> {
         } else if let Some(duration) = app.next().map(|t| t.duration) {
             // Sleep for how much of the duration is left
             let idle = app.last_idle.map(Ok).unwrap_or_else(|| x11api::get_idle(*app.display, *app.info))?;
-            duration.saturating_sub(idle.saturating_sub(app.base))
+            duration.saturating_sub(idle.saturating_sub(app.idle_base))
                 .min(app.timers.first().unwrap().duration)
         } else {
             // Sleep for as long as the first duration, as it's going to reset
@@ -320,9 +320,9 @@ fn main() -> Result<(), Error> {
                             COMMAND_ACTIVATE => app.active = true,
                             COMMAND_TRIGGER => if let Some(primary) = primary {
                                 invoke(&app.timers[primary].command);
-                                app.index = primary + 1;
+                                app.next_index = primary + 1;
 
-                                if app.once && app.index >= app.timers.len() {
+                                if app.once && app.next_index >= app.timers.len() {
                                     break 'main;
                                 }
                             },
@@ -340,8 +340,7 @@ fn main() -> Result<(), Error> {
             }
         }
 
-        if !app.step()? {
-            // Returning Ok(false) means exiting
+        if app.step()? == Status::Exit {
             break;
         }
     }
@@ -361,6 +360,11 @@ struct Timer {
     command: String,
     canceller: Option<String>
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Status {
+    Continue,
+    Exit
+}
 struct App {
     // Data
     display: XDisplay,
@@ -374,19 +378,19 @@ struct App {
     // State
     active: bool,
     audio: bool,
-    index: usize,
+    next_index: usize,
 
     // Temporary state
     last_idle: Option<u64>,
-    base: u64,
+    idle_base: u64,
     fullscreen: Option<bool>
 }
 impl App {
     fn current(&self) -> Option<&Timer> {
-        self.index.checked_sub(1).map(|i| &self.timers[i])
+        self.next_index.checked_sub(1).map(|i| &self.timers[i])
     }
     fn next(&self) -> Option<&Timer> {
-        self.timers.get(self.index)
+        self.timers.get(self.next_index)
     }
     fn reset(&mut self) {
         if let Some(canceller) = self.current().and_then(|t| t.canceller.as_ref()) {
@@ -395,15 +399,15 @@ impl App {
         }
 
         self.fullscreen = None;
-        self.index = 0;
-        self.base = 0;
+        self.next_index = 0;
+        self.idle_base = 0;
     }
-    fn step(&mut self) -> Result<bool, Error> {
+    fn step(&mut self) -> Result<Status, Error> {
         let active = self.active && !self.audio;
 
         if !active {
             self.reset();
-            return Ok(true);
+            return Ok(Status::Continue);
         }
 
         let idle = x11api::get_idle(*self.display, *self.info)?;
@@ -411,17 +415,17 @@ impl App {
         if last_idle.map(|last| idle < last).unwrap_or(false) {
             // Mouse must have moved, idle time is less than previous
             self.reset();
-            return Ok(true)
+            return Ok(Status::Continue)
         }
 
-        if self.index >= self.timers.len() {
+        if self.next_index >= self.timers.len() {
             // We've ran all timers, sit tight
-            return Ok(true);
+            return Ok(Status::Continue);
         }
 
-        if idle < self.base + self.timers[self.index].duration {
+        if idle < self.idle_base + self.timers[self.next_index].duration {
             // We're in before any timer
-            return Ok(true);
+            return Ok(Status::Continue);
         }
 
         if self.not_when_fullscreen && self.fullscreen.is_none() {
@@ -436,19 +440,18 @@ impl App {
         }
         if self.not_when_fullscreen && self.fullscreen.unwrap() {
             // Something is (or was) fullscreen, do nothing
-            return Ok(true);
+            return Ok(Status::Continue);
         }
 
-        let timer = &self.timers[self.index];
+        let timer = &self.timers[self.next_index];
         invoke(&timer.command);
-        self.base += timer.duration;
-        self.index += 1;
+        self.idle_base += timer.duration;
+        self.next_index += 1;
 
-        if self.once && self.index >= self.timers.len() {
-            // false = exit
-            return Ok(false);
+        if self.once && self.next_index >= self.timers.len() {
+            return Ok(Status::Exit);
         }
 
-        Ok(true)
+        Ok(Status::Continue)
     }
 }
