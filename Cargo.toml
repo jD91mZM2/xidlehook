@@ -5,7 +5,8 @@ license-file = "LICENSE"
 name = "xidlehook"
 readme = "README.md"
 repository = "https://github.com/jD91mZM2/xidlehook"
-version = "0.5.0"
+version = "0.6.0"
+
 [dependencies]
 clap = "2.32.0"
 failure = "0.1.3"
