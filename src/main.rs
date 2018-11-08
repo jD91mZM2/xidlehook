@@ -159,6 +159,8 @@ fn main() -> Result<(), Error> {
     let info = unsafe { XPtr::new(XScreenSaverAllocInfo()) };
 
     if matches.is_present("print") {
+        let idle = x11api::get_idle(*display, *info)?;
+        println!("{}", idle);
         return Ok(());
     }
 
@@ -274,7 +276,7 @@ fn main() -> Result<(), Error> {
             1
         } else if let Some(duration) = app.next().map(|t| t.duration) {
             // Sleep for how much of the duration is left
-            let idle = app.last_idle.map(Ok).unwrap_or_else(|| x11api::get_idle(*app.display, *app.info))?;
+            let idle = app.last_idle.map(Ok).unwrap_or_else(|| x11api::get_idle_seconds(*app.display, *app.info))?;
             duration.saturating_sub(idle.saturating_sub(app.idle_base))
                 .min(app.timers.first().unwrap().duration)
         } else {
@@ -410,7 +412,7 @@ impl App {
             return Ok(Status::Continue);
         }
 
-        let idle = x11api::get_idle(*self.display, *self.info)?;
+        let idle = x11api::get_idle_seconds(*self.display, *self.info)?;
         let last_idle = mem::replace(&mut self.last_idle, Some(idle));
         if last_idle.map(|last| idle < last).unwrap_or(false) {
             // Mouse must have moved, idle time is less than previous

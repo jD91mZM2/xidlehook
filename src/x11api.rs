@@ -19,9 +19,12 @@ pub fn get_idle(display: *mut Display, info: *mut XScreenSaverInfo) -> Result<u6
         if XScreenSaverQueryInfo(display, XDefaultRootWindow(display), info) == 0 {
             Err(MyError::XScreenSaver)
         } else {
-            Ok((*info).idle / 1000)
+            Ok((*info).idle)
         }
     }
+}
+pub fn get_idle_seconds(display: *mut Display, info: *mut XScreenSaverInfo) -> Result<u64, MyError> {
+    get_idle(display, info).map(|i| i / 1000)
 }
 
 pub struct XDisplay(*mut Display);
