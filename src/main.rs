@@ -41,10 +41,6 @@ use x11api::{XDisplay, XPtr};
 pub enum MyError {
     #[fail(display = "failed to open x display")]
     XDisplay,
-    #[fail(display = "failed to query x for input focus")]
-    XGetInputFocus,
-    #[fail(display = "failed to query x for window properties")]
-    XGetWindowProperty,
     #[fail(display = "failed to query for screen saver info")]
     XScreenSaver
 }
@@ -402,18 +398,19 @@ impl App {
 
         self.fullscreen = None;
         self.next_index = 0;
-        self.idle_base = 0;
+        self.idle_base = self.last_idle.unwrap_or(0);
     }
     fn step(&mut self) -> Result<Status, Error> {
         let active = self.active && !self.audio;
+
+        let idle = x11api::get_idle_seconds(*self.display, *self.info)?;
+        let last_idle = mem::replace(&mut self.last_idle, Some(idle));
 
         if !active {
             self.reset();
             return Ok(Status::Continue);
         }
 
-        let idle = x11api::get_idle_seconds(*self.display, *self.info)?;
-        let last_idle = mem::replace(&mut self.last_idle, Some(idle));
         if last_idle.map(|last| idle < last).unwrap_or(false) {
             // Mouse must have moved, idle time is less than previous
             self.reset();
@@ -441,7 +438,7 @@ impl App {
             });
         }
         if self.not_when_fullscreen && self.fullscreen.unwrap() {
-            // Something is (or was) fullscreen, do nothing
+            // Something is (or was) fullscreen, ignore
             return Ok(Status::Continue);
         }
 

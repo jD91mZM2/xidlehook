@@ -4,14 +4,13 @@ use libpulse_sys::{
     mainloop::threaded::*
 };
 use std::{
-    ffi::CString,
-    os::raw::c_void,
+    os::raw::{c_char, c_void},
     process::abort,
     ptr,
     sync::mpsc
 };
 
-const PA_NAME: &str = "xidlehook";
+const PA_NAME: &str = "xidlehook\0";
 
 pub type Sender = mpsc::Sender<usize>;
 
@@ -31,10 +30,9 @@ impl Default for PulseAudio {
     fn default() -> Self {
         unsafe {
             let main = pa_threaded_mainloop_new();
-            let name = CString::from_vec_unchecked(PA_NAME.as_bytes().to_vec());
             Self {
                 main,
-                ctx: pa_context_new(pa_threaded_mainloop_get_api(main), name.as_ptr()),
+                ctx: pa_context_new(pa_threaded_mainloop_get_api(main), PA_NAME.as_ptr() as *const c_char),
 
                 counter: None
             }
