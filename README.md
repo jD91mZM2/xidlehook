@@ -57,6 +57,10 @@ Installation using `cargo`:
 cargo install xidlehook
 ```
 
+**Xidlehook with the default settings requires libXScrnSaver (or libxss) and
+libpulseaudio. On debian/ubuntu, don't forget to install the `-dev` versions,
+also.**
+
 It's also available on Nix and the [AUR (not officially maintained)](https://aur.archlinux.org/packages/xidlehook/).
 
 Or if you want to clone it manually:
@@ -71,7 +75,6 @@ cargo build --release
 Not using pulseaudio?  
 Disable that requirement completely with `--no-default-features`!  
 This, however, will get rid of the `--not-when-audio` option.
-
 
 ## Socket API
 The socket API is very simple. Each command is a single byte, sent over a unix
