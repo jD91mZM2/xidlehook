@@ -2,12 +2,12 @@ use crate::MyError;
 
 use std::{
     ops::{Deref, DerefMut},
-    os::raw::{c_char, c_void},
+    os::raw::*,
     ptr
 };
 use x11::{
-    xlib::{Display, XA_ATOM, XCloseDisplay, XDefaultRootWindow, XFree, XGetInputFocus, XGetWindowProperty,
-           XInternAtom, XOpenDisplay},
+    xlib::{Atom, Display, XA_ATOM, XCloseDisplay, XDefaultRootWindow, XFree,
+        XGetInputFocus, XGetWindowProperty, XInternAtom, XOpenDisplay},
     xss::{XScreenSaverInfo, XScreenSaverQueryInfo}
 };
 
@@ -85,69 +85,41 @@ impl<T> Drop for XPtr<T> {
 }
 
 #[derive(Clone, Debug)]
-enum XIntPtr {
-    U8(*mut u8),
-    U16(*mut u16),
-    U32(*mut u32)
-}
-impl XIntPtr {
-    unsafe fn index_u64(&self, i: isize) -> u64 {
-        match *self {
-            XIntPtr::U8(ptr)  => *ptr.offset(i) as u64,
-            XIntPtr::U16(ptr) => *ptr.offset(i) as u64,
-            XIntPtr::U32(ptr) => *ptr.offset(i) as u64
-        }
-    }
-}
+struct XIntPtr(*mut Atom);
 impl Drop for XIntPtr {
     fn drop(&mut self) {
         unsafe {
-            XFree(match *self {
-                XIntPtr::U8(ptr) => ptr as *mut c_void,
-                XIntPtr::U16(ptr) => ptr as *mut c_void,
-                XIntPtr::U32(ptr) => ptr as *mut c_void
-            });
+            XFree(self.0 as *mut c_void);
         }
     }
 }
 pub unsafe fn get_fullscreen(display: *mut Display) -> Result<bool, MyError> {
-    let mut focus = 0u64;
-    let mut revert = 0i32;
-
-    let mut actual_type = 0u64;
-    let mut actual_format = 0i32;
-    let mut nitems = 0u64;
-    let mut bytes = 0u64;
-    let mut data: *mut u8 = ptr::null_mut();
+    let ignored_int = &mut 0;
+    let ignored_ulong = &mut 0;
 
     // Get the focused window
-    XGetInputFocus(display, &mut focus, &mut revert);
+    let mut focus = 0;
+    XGetInputFocus(display, &mut focus, ignored_int);
 
     // Get the window properties of said window
+    let mut data: *mut u8 = ptr::null_mut();
+    let mut nitems = 0;
     XGetWindowProperty(
         display,
         focus,
         XInternAtom(display, NET_WM_STATE.as_ptr() as *const c_char, 0),
         0,
-        !0,
+        c_long::max_value(),
         0,
         XA_ATOM,
-        &mut actual_type,
-        &mut actual_format,
+        ignored_ulong,
+        ignored_int,
         &mut nitems,
-        &mut bytes,
+        ignored_ulong,
         &mut data
     );
 
-    let mut fullscreen = false;
-
-    let data = match actual_format {
-        8  => Some(XIntPtr::U8(data)),
-        16 => Some(XIntPtr::U16(data as *mut u16)),
-        32 => Some(XIntPtr::U32(data as *mut u32)),
-        _  => None
-    };
-
+    let data = XIntPtr(data as *mut _);
     let atom = XInternAtom(
         display,
         NET_WM_STATE_FULLSCREEN.as_ptr() as *const c_char,
@@ -156,11 +128,9 @@ pub unsafe fn get_fullscreen(display: *mut Display) -> Result<bool, MyError> {
 
     // Check the list of returned items for _NET_WM_STATE_FULLSCREEN
     for i in 0..nitems as isize {
-        if data.as_ref().unwrap().index_u64(i) == atom {
-            fullscreen = true;
-            break;
+        if *data.0.offset(i) == atom {
+            return Ok(true);
         }
     }
-
-    Ok(fullscreen)
+    Ok(false)
 }
