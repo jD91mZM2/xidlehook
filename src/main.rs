@@ -6,7 +6,7 @@ extern crate mio;
 extern crate x11;
 
 #[cfg(feature = "pulse")] use std::sync::mpsc;
-use clap::{App as ClapApp, Arg};
+use clap::Arg;
 use failure::Error;
 use mio::{*, unix::EventedFd};
 #[cfg(feature = "nix")]
@@ -70,9 +70,7 @@ fn maybe<T>(res: io::Result<T>) -> io::Result<Option<T>> {
 }
 
 fn main() -> Result<(), Error> {
-    let clap_app = ClapApp::new(crate_name!())
-        .author(crate_authors!())
-        .version(crate_version!())
+    let clap_app = app_from_crate!()
         // Flags
         .arg(
             Arg::with_name("print")

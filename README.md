@@ -87,9 +87,22 @@ whatever you want), and then you can send one of the following bytes:
 | 1    | Activate                          |
 | 2    | Run the timer command immediately |
 
+For convenience, there is now an xidlehook-client (see
+[#18](https://github.com/jD91mZM2/xidlehook/pull/18)), which will communicate
+with this API for you. See
+```
+xidlehook-client --help
+```
+for details.
+
 A common use case of `xidlehook` is using it to run a lockscreen. To then
 manually lock the screen, you could bind this bash command to a shortcut:
-
-```sh
-echo -ne "\x2" | socat - /path/to/xidlehook.sock
 ```
+xidlehook-client --trigger --socket /path/to/xidlehook.sock
+```
+
+Alternatively, you can use the API directly using, for example, `socat`:
+```
+echo -ne "\x0" | socat - UNIX-CONNECT:/path/to/xidlehook.sock
+```
+(You have no reason to run this for the most cases anymore)
