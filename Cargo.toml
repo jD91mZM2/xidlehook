@@ -1,3 +1,5 @@
+#cargo-features = [ "default-run" ]
+
 [package]
 authors = ["jD91mZM2 <me@krake.one>"]
 description = "xautolock rewrite in Rust, with a few extra features"
@@ -6,6 +8,8 @@ name = "xidlehook"
 readme = "README.md"
 repository = "https://github.com/jD91mZM2/xidlehook"
 version = "0.6.2"
+#default-run = "xidlehook"
+
 [dependencies]
 clap = "2.32.0"
 failure = "0.1.5"
