@@ -31,8 +31,8 @@ use std::{
 };
 use x11::xss::{XScreenSaverAllocInfo, XScreenSaverInfo};
 
-#[cfg(feature = "pulse")] mod pulse;
-mod x11api;
+extern crate xidlehook;
+use xidlehook::*;
 
 #[cfg(feature = "pulse")] use pulse::PulseAudio;
 use x11api::{XDisplay, XPtr};
