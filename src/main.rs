@@ -10,9 +10,13 @@ use clap::Arg;
 use failure::Error;
 use mio::{*, unix::EventedFd};
 #[cfg(feature = "nix")]
-use nix::sys::{
-    signal::{Signal, SigSet},
-    signalfd::{SignalFd, SfdFlags}
+use nix::{
+    libc,
+    sys::{
+        signal::{Signal, SigSet},
+        signalfd::{SignalFd, SfdFlags},
+        wait
+    }
 };
 use std::{
     collections::HashMap,
@@ -163,6 +167,7 @@ fn main() -> Result<(), Error> {
         let mut mask = SigSet::empty();
         mask.add(Signal::SIGINT);
         mask.add(Signal::SIGTERM);
+        mask.add(Signal::SIGCHLD);
 
         // signalfd won't receive stuff unless
         // we make the signals be sent synchronously
@@ -283,7 +288,13 @@ fn main() -> Result<(), Error> {
         for event in &events {
             match event.token() {
                 #[cfg(feature = "nix")]
-                TOKEN_SIGNAL => if signal.read_signal()?.is_some() { break 'main; },
+                TOKEN_SIGNAL => match signal.read_signal()?.map(|s| {
+                    Signal::from_c_int(s.ssi_signo as libc::c_int).unwrap()
+                }) {
+                    Some(Signal::SIGINT) | Some(Signal::SIGTERM) => break 'main,
+                    Some(Signal::SIGCHLD) => { wait::wait()?; }, // Reap the zombie process
+                    _ => ()
+                },
                 TOKEN_SERVER => if let Some(listener) = listener.as_mut() {
                     let (mut socket, _) = match maybe(listener.accept())? {
                         Some(socket) => socket,
