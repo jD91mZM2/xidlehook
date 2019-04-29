@@ -361,7 +361,7 @@ dependencies = [
 
 [[package]]
 name = "xidlehook"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "clap 2.33.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "failure 0.1.5 (registry+https://github.com/rust-lang/crates.io-index)",
