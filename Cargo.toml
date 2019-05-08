@@ -3,7 +3,8 @@
 [package]
 authors = ["jD91mZM2 <me@krake.one>"]
 description = "xautolock rewrite in Rust, with a few extra features"
-license-file = "LICENSE"
+edition = "2018"
+license = "MIT"
 name = "xidlehook"
 readme = "README.md"
 repository = "https://github.com/jD91mZM2/xidlehook"
@@ -15,9 +16,11 @@ clap = "2.32.0"
 failure = "0.1.5"
 mio = "0.6.16"
 
-[dependencies.libpulse-sys]
+[dependencies.libpulse-binding]
 optional = true
-version = "1.5.0"
+version = "2.6.0"
+default-features = false
+features = ["pa_v12_compatibility"]
 
 [dependencies.nix]
 optional = true
@@ -29,4 +32,4 @@ version = "2.18.1"
 
 [features]
 default = ["pulse", "nix"]
-pulse = ["libpulse-sys"]
+pulse = ["libpulse-binding"]

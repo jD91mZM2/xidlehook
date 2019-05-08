@@ -1,109 +1,90 @@
-use libpulse_sys::{
-    context::*,
-    context::pa_context,
-    mainloop::threaded::*
+use libpulse_binding::{
+    callbacks::ListResult,
+    context::{subscribe::Facility, Context, State},
+    error::PAErr,
+    mainloop::threaded::Mainloop
 };
 use std::{
-    os::raw::{c_char, c_void},
-    process::abort,
-    ptr,
+    cell::{Cell, RefCell},
+    rc::Rc,
     sync::mpsc
 };
 
-const PA_NAME: &str = "xidlehook\0";
+const PA_NAME: &str = "xidlehook";
 
 pub type Sender = mpsc::Sender<usize>;
 
 pub struct AudioCounter {
-    count: usize,
+    count: Cell<usize>,
     tx: Sender
 }
 
 pub struct PulseAudio {
-    ctx: *mut pa_context,
-    main: *mut pa_threaded_mainloop,
-
-    // needs to be kept alive
-    counter: Option<AudioCounter>,
-}
-impl Default for PulseAudio {
-    fn default() -> Self {
-        unsafe {
-            let main = pa_threaded_mainloop_new();
-            Self {
-                main,
-                ctx: pa_context_new(pa_threaded_mainloop_get_api(main), PA_NAME.as_ptr() as *const c_char),
-
-                counter: None
-            }
-        }
-    }
+    ctx: Rc<RefCell<Context>>,
+    main: Mainloop,
 }
 impl PulseAudio {
-    /// Start a new thread that will send events to tx.
-    /// You will need to make sure that this struct is never moved around in memory after this.
-    pub unsafe fn connect(&mut self, tx: Sender) {
-        extern "C" fn sink_info_callback(
-            _: *mut pa_context,
-            info: *const pa_sink_input_info,
-            _: i32,
-            userdata: *mut c_void
-        ) {
-            unsafe {
-                let counter = &mut *(userdata as *mut AudioCounter);
-                if info.is_null() {
-                    counter.tx.send(counter.count).unwrap_or_else(|_| abort());
-                } else if (*info).corked == 0 {
-                    counter.count += 1;
-                }
-            }
-        }
-        extern "C" fn subscribe_callback(
-            ctx: *mut pa_context,
-            _: pa_subscription_event_type_t,
-            _: u32,
-            userdata: *mut c_void
-        ) {
-            unsafe {
-                let counter = &mut *(userdata as *mut AudioCounter);
-                counter.count = 0;
+    /// Create a new pulseaudio main loop, but don't connect it yet
+    pub fn new() -> Option<Self> {
+        let main = Mainloop::new()?;
+        Some(Self {
+            ctx: Rc::new(RefCell::new(Context::new(&main, PA_NAME)?)),
+            main
+        })
+    }
 
-                // You *could* keep track of events here (like making change events toggle the on/off status),
-                // but it's not reliable
-                pa_context_get_sink_input_info_list(ctx, Some(sink_info_callback), userdata);
-            }
-        }
-        extern "C" fn state_callback(ctx: *mut pa_context, userdata: *mut c_void) {
-            unsafe {
-                let state = pa_context_get_state(ctx);
-
-                if state == PA_CONTEXT_READY {
-                    pa_context_set_subscribe_callback(ctx, Some(subscribe_callback), userdata);
-                    pa_context_subscribe(ctx, PA_SUBSCRIPTION_MASK_SINK_INPUT, None, ptr::null_mut());
-
-                    // In case audio already plays
-                    pa_context_get_sink_input_info_list(ctx, Some(sink_info_callback), userdata);
-                }
-            }
-        }
-
-        self.counter = Some(AudioCounter {
-            count: 0,
+    /// Start a new thread that will send a count of audio devices to
+    /// tx after each change event
+    pub fn connect(&mut self, tx: Sender) -> Result<(), PAErr> {
+        let counter = Rc::new(AudioCounter {
+            count: Cell::new(0),
             tx
         });
-        let userdata = self.counter.as_mut().unwrap() as *mut _ as *mut c_void;
-        pa_context_set_state_callback(self.ctx, Some(state_callback), userdata);
-        pa_context_connect(self.ctx, ptr::null(), 0, ptr::null());
 
-        pa_threaded_mainloop_start(self.main);
+        let ctx = Rc::clone(&self.ctx);
+
+        self.ctx.borrow_mut().set_state_callback(Some(Box::new(move || {
+            if ctx.borrow().get_state() != State::Ready {
+                return;
+            }
+
+            let subscribe_callback = {
+                let ctx = Rc::clone(&ctx);
+                let counter = Rc::clone(&counter);
+
+                move |_, _, _| {
+                    let counter = Rc::clone(&counter);
+                    ctx.borrow().introspect().get_sink_input_info_list(move |res| match res {
+                        ListResult::Item(item) => if !item.corked {
+                            counter.count.set(counter.count.get() + 1);
+                        },
+                        ListResult::End | ListResult::Error => {
+                            counter.tx.send(counter.count.replace(0)).unwrap();
+                        }
+                    });
+                }
+            };
+
+            // Subscribe to sink input events
+            ctx.borrow_mut().set_subscribe_callback(Some(Box::new(subscribe_callback.clone())));
+            ctx.borrow_mut().subscribe(Facility::SinkInput.to_interest_mask(), |_| ());
+
+            // In case audio already plays, trigger
+            subscribe_callback(None, None, 0);
+        })));
+
+        // We sadly can't use borrow_mut here because that keeps a
+        // mutable reference alive while it's runnig all the
+        // callbacks, leading to mutability errors there. See
+        // https://github.com/jnqnfe/pulse-binding-rust/issues/19.
+        unsafe { &mut *self.ctx.as_ptr() }.connect(None, 0, None)?;
+        self.main.start()
     }
 }
 impl Drop for PulseAudio {
     fn drop(&mut self) {
-        unsafe {
-            pa_context_disconnect(self.ctx);
-            pa_threaded_mainloop_stop(self.main);
-            pa_threaded_mainloop_free(self.main);
-        }
+        // See note above
+        unsafe { &mut *self.ctx.as_ptr() }.disconnect();
+        self.main.stop();
     }
 }

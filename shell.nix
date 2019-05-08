@@ -1,7 +1,7 @@
-with import <nixpkgs> {};
+{ pkgs ? import <nixpkgs> {} }:
 
-pkgs.xidlehook.overrideAttrs (old: {
-  buildInputs = lib.filter (pkg: pkg != pkgs.rustc && pkg != pkgs.cargo) old.buildInputs;
-
+pkgs.mkShell {
+  buildInputs = with pkgs; [ xlibsWrapper xorg.libXScrnSaver libpulseaudio ];
+  nativeBuildInputs = with pkgs; [ pkg-config ];
   LD_LIBRARY_PATH = "${pkgs.libpulseaudio}/lib";
-})
+}

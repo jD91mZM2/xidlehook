@@ -1,5 +1,5 @@
 #[cfg(feature = "nix")] extern crate nix;
-#[cfg(feature = "pulse")] extern crate libpulse_sys;
+#[cfg(feature = "pulse")] extern crate libpulse_binding;
 #[macro_use] extern crate clap;
 #[macro_use] extern crate failure;
 extern crate mio;
@@ -38,11 +38,15 @@ use x11::xss::{XScreenSaverAllocInfo, XScreenSaverInfo};
 #[cfg(feature = "pulse")] mod pulse;
 mod x11api;
 
-#[cfg(feature = "pulse")] use pulse::PulseAudio;
-use x11api::{XDisplay, XPtr};
+#[cfg(feature = "pulse")] use crate::pulse::PulseAudio;
+use crate::x11api::{XDisplay, XPtr};
 
 #[derive(Debug, Fail)]
 pub enum MyError {
+    #[fail(display = "failed to create pulseaudio main loop")]
+    PulseAudioNew,
+    #[fail(display = "failed to start pulseaudio main loop: {}", _0)]
+    PulseAudioStart(String),
     #[fail(display = "failed to open x display")]
     XDisplay,
     #[fail(display = "failed to query for screen saver info")]
@@ -153,7 +157,6 @@ fn main() -> Result<(), Error> {
     let matches = clap_app.get_matches();
 
     let display = XDisplay::new()?;
-
     let info = unsafe { XPtr::new(XScreenSaverAllocInfo()) };
 
     if matches.is_present("print") {
@@ -234,16 +237,17 @@ fn main() -> Result<(), Error> {
     #[cfg(feature = "pulse")]
     let (tx_pulse, rx_pulse) = mpsc::channel();
     #[cfg(feature = "pulse")]
-    let mut _pulse = None;
-    #[cfg(feature = "pulse")] {
+    #[cfg(feature = "pulse")]
+    let _pulse = {
         if matches.is_present("not-when-audio") {
-            // be careful not to move the struct
-            _pulse = Some(PulseAudio::default());
-            unsafe {
-                _pulse.as_mut().unwrap().connect(tx_pulse);
-            }
+            let mut pulse = PulseAudio::new().ok_or(MyError::PulseAudioNew)?;
+            pulse.connect(tx_pulse)
+                .map_err(|err| MyError::PulseAudioStart(err.to_string().unwrap_or_default()))?;
+            Some(pulse)
+        } else {
+            None
         }
-    }
+    };
 
     let poll = Poll::new()?;
 
@@ -254,7 +258,7 @@ fn main() -> Result<(), Error> {
     let mut listener = match matches.value_of("socket") {
         None => None,
         Some(socket) => {
-            let mut listener = UnixListener::bind(&socket)?;
+            let listener = UnixListener::bind(&socket)?;
             _socket = Some(DeferRemove(socket)); // remove file when exiting
 
             listener.set_nonblocking(true)?;
@@ -296,7 +300,7 @@ fn main() -> Result<(), Error> {
                     _ => ()
                 },
                 TOKEN_SERVER => if let Some(listener) = listener.as_mut() {
-                    let (mut socket, _) = match maybe(listener.accept())? {
+                    let (socket, _) = match maybe(listener.accept())? {
                         Some(socket) => socket,
                         None => continue
                     };
