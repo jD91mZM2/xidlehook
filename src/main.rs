@@ -1,11 +1,8 @@
-#[cfg(feature = "nix")] extern crate nix;
-#[cfg(feature = "pulse")] extern crate libpulse_binding;
-#[macro_use] extern crate clap;
-#[macro_use] extern crate failure;
-extern crate mio;
-extern crate x11;
+#[macro_use]
+extern crate clap;
+#[macro_use]
+extern crate failure;
 
-#[cfg(feature = "pulse")] use std::sync::mpsc;
 use clap::Arg;
 use failure::Error;
 use mio::{*, unix::EventedFd};
@@ -18,28 +15,27 @@ use nix::{
         wait
     }
 };
+#[cfg(feature = "pulse")]
+use std::sync::mpsc;
 use std::{
     collections::HashMap,
     fs,
     io::{self, prelude::*},
     mem,
-    os::{
-        unix::{
-            io::AsRawFd,
-            net::UnixListener
-        }
+    os::unix::{
+        io::AsRawFd,
+        net::UnixListener
     },
     path::Path,
     process::Command,
     time::Duration
 };
-use x11::xss::{XScreenSaverAllocInfo, XScreenSaverInfo};
 
 #[cfg(feature = "pulse")] mod pulse;
 mod x11api;
 
 #[cfg(feature = "pulse")] use crate::pulse::PulseAudio;
-use crate::x11api::{XDisplay, XPtr};
+use crate::x11api::Xcb;
 
 #[derive(Debug, Fail)]
 pub enum MyError {
@@ -47,10 +43,17 @@ pub enum MyError {
     PulseAudioNew,
     #[fail(display = "failed to start pulseaudio main loop: {}", _0)]
     PulseAudioStart(String),
-    #[fail(display = "failed to open x display")]
-    XDisplay,
-    #[fail(display = "failed to query for screen saver info")]
-    XScreenSaver
+    #[fail(display = "failed to connect to xcb: {}", _0)]
+    XcbConnError(#[cause] xcb::base::ConnError),
+    #[fail(display = "xcb error, code {}", _0)]
+    XcbError(u8),
+    #[fail(display = "failed to find an xcb screen root")]
+    XcbNoRoot,
+}
+impl<T> From<xcb::Error<T>> for MyError {
+    fn from(err: xcb::Error<T>) -> Self {
+        MyError::XcbError(err.error_code())
+    }
 }
 
 struct DeferRemove<T: AsRef<Path>>(T);
@@ -156,11 +159,10 @@ fn main() -> Result<(), Error> {
     }
     let matches = clap_app.get_matches();
 
-    let display = XDisplay::new()?;
-    let info = unsafe { XPtr::new(XScreenSaverAllocInfo()) };
+    let xcb = Xcb::new()?;
 
     if matches.is_present("print") {
-        let idle = x11api::get_idle(*display, *info)?;
+        let idle = xcb.get_idle()?;
         println!("{}", idle);
         return Ok(());
     }
@@ -215,8 +217,7 @@ fn main() -> Result<(), Error> {
 
     let mut app = App {
         // Data
-        display,
-        info,
+        xcb,
 
         // Flags
         not_when_fullscreen: matches.is_present("not-when-fullscreen"),
@@ -279,7 +280,7 @@ fn main() -> Result<(), Error> {
             1
         } else if let Some(duration) = app.next().map(|t| t.duration) {
             // Sleep for how much of the duration is left
-            let idle = app.last_idle.map(Ok).unwrap_or_else(|| x11api::get_idle_seconds(*app.display, *app.info))?;
+            let idle = app.last_idle.map(Ok).unwrap_or_else(|| app.xcb.get_idle_seconds())?;
             duration.saturating_sub(idle.saturating_sub(app.idle_base))
                 .min(app.timers.first().unwrap().duration)
         } else {
@@ -287,7 +288,7 @@ fn main() -> Result<(), Error> {
             // when they wake up
             app.timers.first().unwrap().duration
         };
-        poll.poll(&mut events, Some(Duration::from_secs(delay)))?;
+        poll.poll(&mut events, Some(Duration::from_secs(delay.into())))?;
 
         for event in &events {
             match event.token() {
@@ -367,7 +368,7 @@ fn invoke(cmd: &str) {
     }
 }
 struct Timer {
-    duration: u64,
+    duration: u32,
     command: String,
     canceller: Option<String>
 }
@@ -378,8 +379,7 @@ enum Status {
 }
 struct App {
     // Data
-    display: XDisplay,
-    info: XPtr<XScreenSaverInfo>,
+    xcb: Xcb,
 
     // Flags
     not_when_fullscreen: bool,
@@ -392,8 +392,8 @@ struct App {
     next_index: usize,
 
     // Temporary state
-    last_idle: Option<u64>,
-    idle_base: u64,
+    last_idle: Option<u32>,
+    idle_base: u32,
     fullscreen: Option<bool>
 }
 impl App {
@@ -416,7 +416,7 @@ impl App {
     fn step(&mut self) -> Result<Status, Error> {
         let active = self.active && !self.audio;
 
-        let idle = x11api::get_idle_seconds(*self.display, *self.info)?;
+        let idle = self.xcb.get_idle_seconds()?;
         let last_idle = mem::replace(&mut self.last_idle, Some(idle));
 
         if !active {
@@ -442,7 +442,7 @@ impl App {
 
         if self.not_when_fullscreen && self.fullscreen.is_none() {
             // We haven't cached a fullscreen status, let's fetch one
-            self.fullscreen = Some(match unsafe { x11api::get_fullscreen(*self.display) } {
+            self.fullscreen = Some(match self.xcb.get_fullscreen() {
                 Ok(value) => value,
                 Err(err) => {
                     eprintln!("warning: {}", err);

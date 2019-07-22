@@ -26,9 +26,9 @@ features = ["pa_v12_compatibility"]
 optional = true
 version = "0.13.0"
 
-[dependencies.x11]
-features = ["xlib", "xss"]
-version = "2.18.1"
+[dependencies.xcb]
+features = ["x11", "screensaver"]
+version = "0.8.2"
 
 [features]
 default = ["pulse", "nix"]

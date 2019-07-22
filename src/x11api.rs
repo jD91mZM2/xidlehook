@@ -1,136 +1,66 @@
 use crate::MyError;
 
-use std::{
-    ops::{Deref, DerefMut},
-    os::raw::*,
-    ptr
-};
-use x11::{
-    xlib::{Atom, Display, XA_ATOM, XCloseDisplay, XDefaultRootWindow, XFree,
-        XGetInputFocus, XGetWindowProperty, XInternAtom, XOpenDisplay},
-    xss::{XScreenSaverInfo, XScreenSaverQueryInfo}
-};
+use std::slice;
 
-const NET_WM_STATE: &str = "_NET_WM_STATE\0";
-const NET_WM_STATE_FULLSCREEN: &str = "_NET_WM_STATE_FULLSCREEN\0";
+const NET_WM_STATE: &str = "_NET_WM_STATE";
+const NET_WM_STATE_FULLSCREEN: &str = "_NET_WM_STATE_FULLSCREEN";
 
-pub fn get_idle(display: *mut Display, info: *mut XScreenSaverInfo) -> Result<u64, MyError> {
-    unsafe {
-        if XScreenSaverQueryInfo(display, XDefaultRootWindow(display), info) == 0 {
-            Err(MyError::XScreenSaver)
-        } else {
-            Ok((*info).idle)
-        }
-    }
+pub struct Xcb {
+    conn: xcb::Connection,
+    root_window: xcb::Window,
+    atom_net_wm_state: xcb::Atom,
+    atom_net_wm_state_fullscreen: xcb::Atom,
 }
-pub fn get_idle_seconds(display: *mut Display, info: *mut XScreenSaverInfo) -> Result<u64, MyError> {
-    get_idle(display, info).map(|i| i / 1000)
-}
-
-pub struct XDisplay(*mut Display);
-impl XDisplay {
+impl Xcb {
     pub fn new() -> Result<Self, MyError> {
-        unsafe {
-            let ptr = XOpenDisplay(ptr::null());
-            if ptr.is_null() {
-                Err(MyError::XDisplay)
-            } else {
-                Ok(XDisplay(ptr))
+        let (conn, _) = xcb::Connection::connect(None).map_err(MyError::XcbConnError)?;
+
+        let setup = conn.get_setup();
+        let screen = setup.roots().next().ok_or(MyError::XcbNoRoot)?;
+        let root_window = screen.root();
+
+        let atom_net_wm_state = xcb::xproto::intern_atom(&conn, false, NET_WM_STATE).get_reply()?.atom();
+        let atom_net_wm_state_fullscreen = xcb::xproto::intern_atom(&conn, false, NET_WM_STATE_FULLSCREEN).get_reply()?.atom();
+
+        Ok(Self {
+            conn,
+            root_window,
+            atom_net_wm_state,
+            atom_net_wm_state_fullscreen,
+        })
+    }
+    pub fn get_idle(&self) -> Result<u32, MyError> {
+        let info = xcb::screensaver::query_info(&self.conn, self.root_window).get_reply()?;
+        Ok(info.ms_since_user_input())
+    }
+    pub fn get_idle_seconds(&self) -> Result<u32, MyError> {
+        self.get_idle().map(|i| i / 1000)
+    }
+    pub fn get_fullscreen(&self) -> Result<bool, MyError> {
+        let focused_window = xcb::xproto::get_input_focus(&self.conn).get_reply()?.focus();
+        let prop = xcb::xproto::get_property(
+            &self.conn, // c
+            false, // delete
+            focused_window, // window
+            self.atom_net_wm_state, // property
+            xcb::xproto::ATOM_ATOM, // type_
+            0, // long_offset
+            u32::max_value() // long_length
+        ).get_reply()?;
+
+        // The safe API can't possibly know what value xcb returned,
+        // sadly. Here we are manually transmuting &[c_void] to
+        // &[Atom], as we specified we want an atom.
+        let value = dbg!(prop.value());
+        let value = unsafe {
+            slice::from_raw_parts(value.as_ptr() as *const xcb::xproto::Atom, value.len())
+        };
+
+        for &atom in value {
+            if atom == self.atom_net_wm_state_fullscreen {
+                return Ok(true);
             }
         }
+        Ok(false)
     }
-}
-impl Deref for XDisplay {
-    type Target = *mut Display;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl DerefMut for XDisplay {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-impl Drop for XDisplay {
-    fn drop(&mut self) {
-        unsafe {
-            XCloseDisplay(self.0);
-        }
-    }
-}
-
-pub struct XPtr<T>(*mut T);
-impl<T> XPtr<T> {
-    pub unsafe fn new(ptr: *mut T) -> Self {
-        XPtr(ptr)
-    }
-}
-impl<T> Deref for XPtr<T> {
-    type Target = *mut T;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl<T> DerefMut for XPtr<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-impl<T> Drop for XPtr<T> {
-    fn drop(&mut self) {
-        unsafe {
-            XFree(self.0 as *mut c_void);
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct XIntPtr(*mut Atom);
-impl Drop for XIntPtr {
-    fn drop(&mut self) {
-        unsafe {
-            XFree(self.0 as *mut c_void);
-        }
-    }
-}
-pub unsafe fn get_fullscreen(display: *mut Display) -> Result<bool, MyError> {
-    let ignored_int = &mut 0;
-    let ignored_ulong = &mut 0;
-
-    // Get the focused window
-    let mut focus = 0;
-    XGetInputFocus(display, &mut focus, ignored_int);
-
-    // Get the window properties of said window
-    let mut data: *mut u8 = ptr::null_mut();
-    let mut nitems = 0;
-    XGetWindowProperty(
-        display,
-        focus,
-        XInternAtom(display, NET_WM_STATE.as_ptr() as *const c_char, 0),
-        0,
-        c_long::max_value(),
-        0,
-        XA_ATOM,
-        ignored_ulong,
-        ignored_int,
-        &mut nitems,
-        ignored_ulong,
-        &mut data
-    );
-
-    let data = XIntPtr(data as *mut _);
-    let atom = XInternAtom(
-        display,
-        NET_WM_STATE_FULLSCREEN.as_ptr() as *const c_char,
-        0
-    );
-
-    // Check the list of returned items for _NET_WM_STATE_FULLSCREEN
-    for i in 0..nitems as isize {
-        if *data.0.offset(i) == atom {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
