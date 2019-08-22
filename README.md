@@ -106,3 +106,9 @@ Alternatively, you can use the API directly using, for example, `socat`:
 echo -ne "\x0" | socat - UNIX-CONNECT:/path/to/xidlehook.sock
 ```
 (You have no reason to run this for the most cases anymore)
+
+## Caffeinate
+
+If you're looking for a more elaborate client to temporarily disable
+`xidlehook`, take a look at [caffeinate](https://github.com/rschmukler/caffeinate) which
+has timers and PID based monitoring.
