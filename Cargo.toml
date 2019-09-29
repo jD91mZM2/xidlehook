@@ -1,5 +1,3 @@
-#cargo-features = [ "default-run" ]
-
 [package]
 authors = ["jD91mZM2 <me@krake.one>"]
 description = "xautolock rewrite in Rust, with a few extra features"
@@ -8,13 +6,14 @@ license = "MIT"
 name = "xidlehook"
 readme = "README.md"
 repository = "https://github.com/jD91mZM2/xidlehook"
-version = "0.7.1"
-#default-run = "xidlehook"
+version = "0.8.0"
+default-run = "xidlehook"
 
 [dependencies]
-clap = "2.32.0"
-failure = "0.1.5"
-mio = "0.6.16"
+log = "0.4.8"
+structopt = "0.3.2"
+env_logger = "0.7.0"
+nix = "0.15.0"
 
 [dependencies.libpulse-binding]
 optional = true
@@ -22,14 +21,10 @@ version = "2.6.0"
 default-features = false
 features = ["pa_v12_compatibility"]
 
-[dependencies.nix]
-optional = true
-version = "0.13.0"
-
 [dependencies.xcb]
 features = ["x11", "screensaver"]
 version = "0.8.2"
 
 [features]
-default = ["pulse", "nix"]
+default = ["pulse"]
 pulse = ["libpulse-binding"]
