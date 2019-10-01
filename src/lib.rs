@@ -1,8 +1,4 @@
-use std::{
-    cmp,
-    ptr,
-    time::Duration,
-};
+use std::{cmp, ptr, time::Duration};
 
 use log::trace;
 use nix::libc;
@@ -63,7 +59,7 @@ macro_rules! with_module {
             previous_idle_time: $self.previous_idle_time,
             aborted: $self.aborted,
         }
-    }
+    };
 }
 
 impl<T, M> Xidlehook<T, M>
@@ -106,7 +102,8 @@ where
     /// Returns the previous timer that was activated (but not
     /// deactivated)
     fn previous(&mut self) -> Option<&mut T> {
-        self.next_index.checked_sub(1)
+        self.next_index
+            .checked_sub(1)
             .map(move |i| &mut self.timers[i])
     }
 
@@ -148,8 +145,13 @@ where
 
         self.previous_idle_time = absolute_time;
 
-        let mut max_sleep = self.timers[0].time_left(Duration::default())?.unwrap_or_default();
-        trace!("Taking the first timer into account. Remaining: {:?}", max_sleep);
+        let mut max_sleep = self.timers[0]
+            .time_left(Duration::default())?
+            .unwrap_or_default();
+        trace!(
+            "Taking the first timer into account. Remaining: {:?}",
+            max_sleep
+        );
 
         if self.aborted {
             // This chain was aborted, so don't pursue it
@@ -181,7 +183,10 @@ where
 
                         if let Some(next) = self.timers.get_mut(self.next_index) {
                             if let Some(remaining) = next.time_left(Duration::default())? {
-                                trace!("Taking next-next timer into account. Remaining: {:?}", remaining);
+                                trace!(
+                                    "Taking next-next timer into account. Remaining: {:?}",
+                                    remaining
+                                );
                                 max_sleep = cmp::min(max_sleep, remaining);
                             }
                         }
@@ -193,7 +198,7 @@ where
                     },
                     Err(err) => {
                         self.module.warning(&err);
-                    }
+                    },
                 }
             }
         }
@@ -202,7 +207,10 @@ where
         // urgency (see `Timer::abort_urgency()`)
         if let Some(abort) = self.previous() {
             if let Some(urgency) = abort.abort_urgency() {
-                trace!("Taking abort urgency into account. Remaining: {:?}", urgency);
+                trace!(
+                    "Taking abort urgency into account. Remaining: {:?}",
+                    urgency
+                );
                 max_sleep = cmp::min(max_sleep, urgency);
             }
         }
@@ -213,7 +221,7 @@ where
     /// Runs a standard poll-sleep-repeat loop
     pub fn main<F>(&mut self, xcb: &self::modules::Xcb, mut callback: F) -> Result<()>
     where
-        F: FnMut() -> bool
+        F: FnMut() -> bool,
     {
         loop {
             let idle = xcb.get_idle()?;
@@ -223,10 +231,13 @@ where
 
             // This sleep, unlike `thread::sleep`, will stop for signals.
             unsafe {
-                libc::nanosleep(&libc::timespec {
-                    tv_sec: delay.as_secs() as libc::time_t,
-                    tv_nsec: delay.subsec_nanos() as libc::c_long,
-                }, ptr::null_mut());
+                libc::nanosleep(
+                    &libc::timespec {
+                        tv_sec: delay.as_secs() as libc::time_t,
+                        tv_nsec: delay.subsec_nanos() as libc::c_long,
+                    },
+                    ptr::null_mut(),
+                );
             }
 
             if callback() {

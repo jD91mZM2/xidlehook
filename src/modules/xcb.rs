@@ -1,10 +1,6 @@
 use crate::{Module, Progress, Result};
 
-use std::{
-    rc::Rc,
-    slice,
-    time::Duration,
-};
+use std::{rc::Rc, slice, time::Duration};
 
 use log::debug;
 
@@ -65,7 +61,10 @@ impl Xcb {
         let value = prop.value();
 
         debug!("xcb::xproto::get_property(...) = {:?}", value);
-        debug!("NET_WM_STATE_FULLSCREEN = {:?}", self.atom_net_wm_state_fullscreen);
+        debug!(
+            "NET_WM_STATE_FULLSCREEN = {:?}",
+            self.atom_net_wm_state_fullscreen
+        );
 
         let value = unsafe {
             slice::from_raw_parts(value.as_ptr() as *const xcb::xproto::Atom, value.len())
@@ -80,22 +79,21 @@ impl Xcb {
     }
 
     pub fn not_when_fullscreen(self: Rc<Self>) -> NotWhenFullscreen {
-        NotWhenFullscreen {
-            xcb: self
-        }
+        NotWhenFullscreen { xcb: self }
     }
 }
 
 pub struct NotWhenFullscreen {
-    xcb: Rc<Xcb>
+    xcb: Rc<Xcb>,
 }
 impl Module for NotWhenFullscreen {
     fn pre_timer(&mut self) -> Result<Progress> {
-        self.xcb.get_fullscreen()
-            .map(|fullscreen| if fullscreen {
+        self.xcb.get_fullscreen().map(|fullscreen| {
+            if fullscreen {
                 Progress::Abort
             } else {
                 Progress::Continue
-            })
+            }
+        })
     }
 }

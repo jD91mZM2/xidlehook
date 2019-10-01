@@ -1,11 +1,11 @@
 use crate::{Module, Progress, Result};
 
-use log::debug;
 use libpulse_binding::{
     callbacks::ListResult,
     context::{subscribe::Facility, Context, State},
     mainloop::threaded::Mainloop,
 };
+use log::debug;
 use std::{
     cell::RefCell,
     rc::Rc,
@@ -34,7 +34,9 @@ impl NotWhenAudio {
 
         // Should probably be thread-safe, see https://github.com/jnqnfe/pulse-binding-rust/issues/27
         // ... but it can't be thread-safe, see https://github.com/jnqnfe/pulse-binding-rust/issues/19
-        let ctx = Rc::new(RefCell::new(Context::new(&main, PA_NAME).ok_or("pulseaudio: failed to create context")?));
+        let ctx = Rc::new(RefCell::new(
+            Context::new(&main, PA_NAME).ok_or("pulseaudio: failed to create context")?,
+        ));
 
         let counter = Arc::new(Counter {
             in_progress: AtomicUsize::new(0),
@@ -63,15 +65,16 @@ impl NotWhenAudio {
                                 .get_sink_input_info_list(move |res| match res {
                                     ListResult::Item(item) => {
                                         if !item.corked {
-                                            let count = counter.in_progress.fetch_add(1, Ordering::SeqCst);
+                                            let count =
+                                                counter.in_progress.fetch_add(1, Ordering::SeqCst);
                                             debug!("Partial count: {}", count);
                                         }
-                                    }
+                                    },
                                     ListResult::End | ListResult::Error => {
                                         let count = counter.in_progress.swap(0, Ordering::SeqCst);
                                         counter.last_total.store(count, Ordering::SeqCst);
                                         debug!("Total sum: {}", count);
-                                    }
+                                    },
                                 });
                         }
                     };
@@ -92,14 +95,12 @@ impl NotWhenAudio {
         // mutable reference alive while it's runnig all the
         // callbacks, leading to mutability errors there. See
         // https://github.com/jnqnfe/pulse-binding-rust/issues/19.
-        unsafe { &mut *ctx.as_ptr() }.connect(None, 0, None).map_err(|err| format!("pulseaudio: {}", err))?;
+        unsafe { &mut *ctx.as_ptr() }
+            .connect(None, 0, None)
+            .map_err(|err| format!("pulseaudio: {}", err))?;
         main.start().map_err(|err| format!("pulseaudio: {}", err))?;
 
-        Ok(Self {
-            counter,
-            ctx,
-            main,
-        })
+        Ok(Self { counter, ctx, main })
     }
 }
 impl Drop for NotWhenAudio {

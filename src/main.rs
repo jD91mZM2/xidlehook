@@ -6,16 +6,16 @@ use std::{
     time::Duration,
 };
 
-use structopt::StructOpt;
 use log::trace;
 use nix::{
     libc,
     sys::{signal, wait},
 };
+use structopt::StructOpt;
 use xidlehook::{
     modules::{Module, Xcb},
     timers::CmdTimer,
-    Xidlehook
+    Xidlehook,
 };
 
 #[derive(StructOpt)]
@@ -83,7 +83,7 @@ fn main() -> xidlehook::Result<()> {
             Err(err) => {
                 eprintln!("error: failed to parse duration as number: {}", err);
                 return Ok(());
-            }
+            },
         };
         timers.push(CmdTimer {
             time: Duration::from_secs(duration),
@@ -95,14 +95,23 @@ fn main() -> xidlehook::Result<()> {
 
     unsafe {
         for &(signal, handler) in &[
-            (signal::Signal::SIGINT, exit_handler as extern "C" fn(libc::c_int)),
-            (signal::Signal::SIGCHLD, sigchld_handler as extern "C" fn(libc::c_int)),
+            (
+                signal::Signal::SIGINT,
+                exit_handler as extern "C" fn(libc::c_int),
+            ),
+            (
+                signal::Signal::SIGCHLD,
+                sigchld_handler as extern "C" fn(libc::c_int),
+            ),
         ] {
-            signal::sigaction(signal, &signal::SigAction::new(
-                signal::SigHandler::Handler(handler),
-                signal::SaFlags::empty(),
-                signal::SigSet::empty(),
-            ))?;
+            signal::sigaction(
+                signal,
+                &signal::SigAction::new(
+                    signal::SigHandler::Handler(handler),
+                    signal::SaFlags::empty(),
+                    signal::SigSet::empty(),
+                ),
+            )?;
         }
     }
 
