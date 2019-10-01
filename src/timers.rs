@@ -31,7 +31,7 @@ pub struct CmdTimer {
 }
 impl Timer for CmdTimer {
     fn time_left(&mut self, idle_time: Duration) -> Result<Option<Duration>> {
-        Ok(self.time.checked_sub(idle_time).filter(|&dur| dur != Duration::new(0, 0)))
+        Ok(self.time.checked_sub(idle_time).filter(|&dur| dur != Duration::default()))
     }
     fn abort_urgency(&self) -> Option<Duration> {
         self.abortion.as_ref().map(|_| Duration::from_secs(1))
