@@ -1,19 +1,17 @@
 use std::{
     process::Command,
-    ptr,
     rc::Rc,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 
-use log::trace;
 use nix::{
     libc,
     sys::{signal, wait},
 };
 use structopt::StructOpt;
 use xidlehook::{
-    modules::{Module, Xcb},
+    modules::{Module, StopAt, Xcb},
     timers::CmdTimer,
     Xidlehook,
 };
@@ -116,6 +114,10 @@ fn main() -> xidlehook::Result<()> {
     }
 
     let mut modules: Vec<Box<dyn Module>> = Vec::new();
+
+    if opt.once {
+        modules.push(Box::new(StopAt::completion()));
+    }
 
     if opt.not_when_fullscreen {
         modules.push(Box::new(Rc::clone(&xcb).not_when_fullscreen()));

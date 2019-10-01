@@ -8,4 +8,4 @@ cargo run -- \
       --timer 5 "echo 10" "echo Cancelled between 10 and 15" \
       --timer 5 "echo 15" "" \
       --timer 5 "echo 20" "" \
-      --not-when-fullscreen --not-when-audio
+      --not-when-fullscreen --not-when-audio --once

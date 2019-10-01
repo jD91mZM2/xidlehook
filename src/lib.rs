@@ -14,6 +14,12 @@ pub use self::{
     timers::Timer,
 };
 
+#[derive(Clone, Copy, Debug)]
+pub struct TimerInfo {
+    pub index: usize,
+    pub length: usize,
+}
+
 /// The main xidlehook instance that allows you to schedule things
 pub struct Xidlehook<T: Timer, M: Module>
 where
@@ -136,7 +142,7 @@ where
 
     /// Polls the scheduler for any activated timers. On success,
     /// returns the max amount of time a program can sleep for.
-    pub fn poll(&mut self, absolute_time: Duration) -> Result<Duration> {
+    pub fn poll(&mut self, absolute_time: Duration) -> Result<Option<Duration>> {
         if absolute_time < self.previous_idle_time {
             // If the idle time has decreased, the only reasonable
             // explanation is that the user briefly wasn't idle.
@@ -155,11 +161,16 @@ where
 
         if self.aborted {
             // This chain was aborted, so don't pursue it
-            return Ok(max_sleep);
+            return Ok(Some(max_sleep));
         }
 
         let relative_time = absolute_time - self.base_idle_time;
         trace!("Relative time: {:?}", relative_time);
+
+        let timer_info = TimerInfo {
+            index: self.next_index,
+            length: self.timers.len(),
+        };
 
         // When there's a next timer available, get the time until that activates
         if let Some(next) = self.timers.get_mut(self.next_index) {
@@ -170,35 +181,53 @@ where
                 // Oh! It's already been activated.
                 trace!("Activating timer...");
 
-                match self.module.pre_timer() {
-                    Ok(Progress::Continue) => {
-                        next.activate()?;
-                        if let Some(previous) = self.previous() {
-                            previous.deactivate()?;
-                        }
-
-                        self.next_index += 1;
-                        self.base_idle_time = absolute_time;
-                        // From now on, `relative_time` is invalid. Don't use it.
-
-                        if let Some(next) = self.timers.get_mut(self.next_index) {
-                            if let Some(remaining) = next.time_left(Duration::default())? {
-                                trace!(
-                                    "Taking next-next timer into account. Remaining: {:?}",
-                                    remaining
-                                );
-                                max_sleep = cmp::min(max_sleep, remaining);
-                            }
-                        }
-                    },
+                match self.module.pre_timer(timer_info) {
+                    Ok(Progress::Continue) => (),
                     Ok(Progress::Abort) => {
                         trace!("Module requested abort of chain.");
                         self.abort()?;
-                        return Ok(max_sleep);
+                        return Ok(Some(max_sleep));
+                    },
+                    Ok(Progress::Stop) => {
+                        return Ok(None);
                     },
                     Err(err) => {
-                        self.module.warning(&err);
+                        self.module.warning(&err)?;
                     },
+                }
+
+                next.activate()?;
+                if let Some(previous) = self.previous() {
+                    previous.deactivate()?;
+                }
+
+                match self.module.post_timer(timer_info) {
+                    Ok(Progress::Continue) => (),
+                    Ok(Progress::Abort) => {
+                        trace!("Module requested abort of chain.");
+                        self.abort()?;
+                        return Ok(Some(max_sleep));
+                    },
+                    Ok(Progress::Stop) => {
+                        return Ok(None);
+                    },
+                    Err(err) => {
+                        self.module.warning(&err)?;
+                    },
+                }
+
+                self.next_index += 1;
+                self.base_idle_time = absolute_time;
+                // From now on, `relative_time` is invalid. Don't use it.
+
+                if let Some(next) = self.timers.get_mut(self.next_index) {
+                    if let Some(remaining) = next.time_left(Duration::default())? {
+                        trace!(
+                            "Taking next-next timer into account. Remaining: {:?}",
+                            remaining
+                        );
+                        max_sleep = cmp::min(max_sleep, remaining);
+                    }
                 }
             }
         }
@@ -215,7 +244,7 @@ where
             }
         }
 
-        Ok(max_sleep)
+        Ok(Some(max_sleep))
     }
 
     /// Runs a standard poll-sleep-repeat loop
@@ -226,7 +255,10 @@ where
         loop {
             let idle = xcb.get_idle()?;
 
-            let delay = self.poll(idle)?;
+            let delay = match self.poll(idle)? {
+                Some(delay) => delay,
+                None => break,
+            };
             trace!("Sleeping for {:?}", delay);
 
             // This sleep, unlike `thread::sleep`, will stop for signals.

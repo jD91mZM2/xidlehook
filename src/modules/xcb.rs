@@ -1,4 +1,4 @@
-use crate::{Module, Progress, Result};
+use crate::{Module, Progress, Result, TimerInfo};
 
 use std::{rc::Rc, slice, time::Duration};
 
@@ -87,7 +87,7 @@ pub struct NotWhenFullscreen {
     xcb: Rc<Xcb>,
 }
 impl Module for NotWhenFullscreen {
-    fn pre_timer(&mut self) -> Result<Progress> {
+    fn pre_timer(&mut self, _timer: TimerInfo) -> Result<Progress> {
         self.xcb.get_fullscreen().map(|fullscreen| {
             if fullscreen {
                 Progress::Abort

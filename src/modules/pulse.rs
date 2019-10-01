@@ -1,4 +1,4 @@
-use crate::{Module, Progress, Result};
+use crate::{Module, Progress, Result, TimerInfo};
 
 use libpulse_binding::{
     callbacks::ListResult,
@@ -111,7 +111,7 @@ impl Drop for NotWhenAudio {
     }
 }
 impl Module for NotWhenAudio {
-    fn pre_timer(&mut self) -> Result<Progress> {
+    fn pre_timer(&mut self, _timer: TimerInfo) -> Result<Progress> {
         let players = self.counter.last_total.load(Ordering::SeqCst);
         if players == 0 {
             Ok(Progress::Continue)

@@ -1,4 +1,4 @@
-use crate::{Error, Result};
+use crate::{Error, Result, TimerInfo};
 
 use log::warn;
 
@@ -8,18 +8,27 @@ use log::warn;
 pub enum Progress {
     Continue,
     Abort,
+    Stop,
 }
 
 /// A generic module that controls whether timers should execute or
 /// not (outside of the normal timer)
 pub trait Module {
-    /// Decides if the timer should be allowed to execute
-    fn pre_timer(&mut self) -> Result<Progress> {
+    /// Decides if a timer should be allowed to execute
+    fn pre_timer(&mut self, _timer: TimerInfo) -> Result<Progress> {
         Ok(Progress::Continue)
     }
 
-    /// Is called when there's a recoverable error
-    fn warning(&mut self, _error: &Error) {}
+    /// Decides what happens after a timer has executed
+    fn post_timer(&mut self, _timer: TimerInfo) -> Result<Progress> {
+        Ok(Progress::Continue)
+    }
+
+    /// Is called when there's a potentially recoverable error. Can
+    /// re-throw an unrecoverable error.
+    fn warning(&mut self, _error: &Error) -> Result<()> {
+        Ok(())
+    }
 
     /// If this is called, the counting was reset - clear any cache
     /// here
@@ -30,16 +39,20 @@ pub trait Module {
 
 /// The default module is also the unit type because why not
 impl Module for () {
-    fn warning(&mut self, error: &Error) {
+    fn warning(&mut self, error: &Error) -> Result<()> {
         warn!("{} (Debug: {:?})", error, error);
+        Ok(())
     }
 }
 
 impl Module for Box<dyn Module> {
-    fn pre_timer(&mut self) -> Result<Progress> {
-        (&mut **self).pre_timer()
+    fn pre_timer(&mut self, timer: TimerInfo) -> Result<Progress> {
+        (&mut **self).pre_timer(timer)
     }
-    fn warning(&mut self, error: &Error) {
+    fn post_timer(&mut self, timer: TimerInfo) -> Result<Progress> {
+        (&mut **self).post_timer(timer)
+    }
+    fn warning(&mut self, error: &Error) -> Result<()> {
         (&mut **self).warning(error)
     }
     fn reset(&mut self) -> Result<()> {
@@ -54,15 +67,23 @@ where
     A: Module,
     B: Module,
 {
-    fn pre_timer(&mut self) -> Result<Progress> {
-        if self.0.pre_timer()? == Progress::Abort {
-            return Ok(Progress::Abort);
+    fn pre_timer(&mut self, timer: TimerInfo) -> Result<Progress> {
+        let status = self.0.pre_timer(timer)?;
+        if status != Progress::Continue {
+            return Ok(status);
         }
-        self.1.pre_timer()
+        self.1.pre_timer(timer)
     }
-    fn warning(&mut self, error: &Error) {
-        self.0.warning(error);
-        self.1.warning(error);
+    fn post_timer(&mut self, timer: TimerInfo) -> Result<Progress> {
+        let status = self.0.post_timer(timer)?;
+        if status != Progress::Continue {
+            return Ok(status);
+        }
+        self.1.post_timer(timer)
+    }
+    fn warning(&mut self, error: &Error) -> Result<()> {
+        self.0.warning(error)?;
+        self.1.warning(error)
     }
     fn reset(&mut self) -> Result<()> {
         self.0.reset()?;
@@ -72,18 +93,29 @@ where
 
 /// Combine multiple modules with a dynamic size
 impl<M: Module> Module for Vec<M> {
-    fn pre_timer(&mut self) -> Result<Progress> {
+    fn pre_timer(&mut self, timer: TimerInfo) -> Result<Progress> {
         for module in self {
-            if module.pre_timer()? == Progress::Abort {
-                return Ok(Progress::Abort);
+            let status = module.pre_timer(timer)?;
+            if status != Progress::Continue {
+                return Ok(status);
             }
         }
         Ok(Progress::Continue)
     }
-    fn warning(&mut self, error: &Error) {
+    fn post_timer(&mut self, timer: TimerInfo) -> Result<Progress> {
         for module in self {
-            module.warning(error);
+            let status = module.post_timer(timer)?;
+            if status != Progress::Continue {
+                return Ok(status);
+            }
         }
+        Ok(Progress::Continue)
+    }
+    fn warning(&mut self, error: &Error) -> Result<()> {
+        for module in self {
+            module.warning(error)?;
+        }
+        Ok(())
     }
     fn reset(&mut self) -> Result<()> {
         for module in self {
@@ -93,10 +125,12 @@ impl<M: Module> Module for Vec<M> {
     }
 }
 
+pub mod once;
 #[cfg(feature = "pulse")]
 pub mod pulse;
 pub mod xcb;
 
+pub use self::once::StopAt;
 #[cfg(feature = "pulse")]
 pub use self::pulse::NotWhenAudio;
 pub use self::xcb::Xcb;
