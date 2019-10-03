@@ -1,5 +1,4 @@
 use crate::{Module, Progress, Result, TimerInfo};
-use log::debug;
 
 pub struct StopAt {
     stop_after: Option<usize>,

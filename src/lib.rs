@@ -127,21 +127,34 @@ where
     }
 
     /// Calls the abortion functions on the current timer and restarts
-    /// from index zero
+    /// from index zero. Just like `poll` is continued usage after an
+    /// error discouraged.
     fn reset(&mut self) -> Result<()> {
         self.abort()?;
+
         if self.next_index > 0 {
-            self.module.reset()?;
+            if let Err(err) = self.module.reset() {
+                self.module.warning(&err)?;
+            }
             self.next_index = 0;
         }
+
         self.base_idle_time = Duration::default();
         self.previous_idle_time = Duration::default();
         self.aborted = false;
+
         Ok(())
     }
 
     /// Polls the scheduler for any activated timers. On success,
-    /// returns the max amount of time a program can sleep for.
+    /// returns the max amount of time a program can sleep for. Only
+    /// fatal errors cause this function to return, and at that point,
+    /// the state of xidlehook is undefined so it should not be used.
+    ///
+    /// # Panics
+    ///
+    /// Panics when there are no timers added - there must always be
+    /// at least one.
     pub fn poll(&mut self, absolute_time: Duration) -> Result<Option<Duration>> {
         if absolute_time < self.previous_idle_time {
             // If the idle time has decreased, the only reasonable
@@ -248,7 +261,7 @@ where
     }
 
     /// Runs a standard poll-sleep-repeat loop
-    pub fn main<F>(&mut self, xcb: &self::modules::Xcb, mut callback: F) -> Result<()>
+    pub fn main<F>(mut self, xcb: &self::modules::Xcb, mut callback: F) -> Result<()>
     where
         F: FnMut() -> bool,
     {
