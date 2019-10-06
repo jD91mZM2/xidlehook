@@ -1,13 +1,30 @@
-use std::{process::Command, rc::Rc, time::Duration};
-
-use structopt::StructOpt;
-use xidlehook::{
-    modules::{Module, StopAt, Xcb},
-    timers::CmdTimer,
-    Xidlehook,
+use std::{
+    process::Command,
+    rc::Rc,
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
 };
 
-mod bin_impl;
+use nix::{
+    libc,
+    sys::{signal, wait},
+};
+use structopt::StructOpt;
+use xidlehook::{
+    modules::{StopAt, Xcb},
+    timers::CmdTimer,
+    Module, Timer, Xidlehook,
+};
+
+static EXITED: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn exit_handler(_signo: libc::c_int) {
+    EXITED.store(true, Ordering::SeqCst);
+}
+
+extern "C" fn sigchld_handler(_signo: libc::c_int) {
+    let _ = wait::waitpid(None, Some(wait::WaitPidFlag::WNOHANG));
+}
 
 #[derive(StructOpt, Debug)]
 pub struct Opt {
@@ -97,8 +114,29 @@ fn main() -> xidlehook::Result<()> {
 
     let xidlehook = Xidlehook::new(timers).register(modules);
 
-    bin_impl::main_loop(opt, xidlehook, xcb)?;
+    unsafe {
+        for &(signal, handler) in &[
+            (
+                signal::Signal::SIGINT,
+                exit_handler as extern "C" fn(libc::c_int),
+            ),
+            (
+                signal::Signal::SIGCHLD,
+                sigchld_handler as extern "C" fn(libc::c_int),
+            ),
+        ] {
+            signal::sigaction(
+                signal,
+                &signal::SigAction::new(
+                    signal::SigHandler::Handler(handler),
+                    signal::SaFlags::empty(),
+                    signal::SigSet::empty(),
+                ),
+            )?;
+        }
+    }
 
+    xidlehook.main_sync(&xcb, || EXITED.load(Ordering::SeqCst))?;
     Ok(())
 }
 fn command(cmd: &str) -> Command {

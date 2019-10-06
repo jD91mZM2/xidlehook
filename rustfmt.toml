@@ -2,5 +2,6 @@
 edition = "2018"
 
 # Unstable
+merge_imports = true
 unstable_features = true
 match_block_trailing_comma = true

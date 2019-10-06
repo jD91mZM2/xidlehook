@@ -132,5 +132,4 @@ pub mod xcb;
 
 #[cfg(feature = "pulse")]
 pub use self::pulse::NotWhenAudio;
-pub use self::stop_at::StopAt;
-pub use self::xcb::Xcb;
+pub use self::{stop_at::StopAt, xcb::Xcb};
