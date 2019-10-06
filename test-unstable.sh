@@ -1,5 +1,7 @@
 #!/bin/sh
 
+set -e
+
 cargo +beta run --features unstable -- \
       --timer 2 "echo 2" "" \
       --timer 1 "echo 3" "" \

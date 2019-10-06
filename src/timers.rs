@@ -69,7 +69,7 @@ impl Timer for CmdTimer {
 /// activation
 pub struct CallbackTimer<F>
 where
-    F: FnMut()
+    F: FnMut(),
 {
     time: Duration,
     f: F,
@@ -81,14 +81,14 @@ impl<'a> CallbackTimer<Box<dyn FnMut() + 'a>> {
     /// than one type of callback timer due to its static type.
     pub fn new<F>(time: Duration, f: F) -> Self
     where
-        F: FnMut() + 'a
+        F: FnMut() + 'a,
     {
         Self::new_unboxed(time, Box::new(f))
     }
 }
 impl<F> CallbackTimer<F>
 where
-    F: FnMut()
+    F: FnMut(),
 {
     /// Create a new unboxed instance. Due to it's static type, only
     /// one type can be used. This means that registering 2 timers
@@ -104,7 +104,7 @@ where
 }
 impl<F> Timer for CallbackTimer<F>
 where
-    F: FnMut()
+    F: FnMut(),
 {
     fn time_left(&mut self, idle_time: Duration) -> Result<Option<Duration>> {
         Ok(self
@@ -117,4 +117,3 @@ where
         Ok(())
     }
 }
-

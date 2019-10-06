@@ -1,3 +1,10 @@
+//! Instead of implementing your extension as something that
+//! communicates with xidlehook, what about implementing your
+//! extension as something that *is* xidlehook?
+//!
+//! This library lets you create your own xidlehook front-end using a
+//! powerful timer and module system.
+
 use std::{cmp, ptr, time::Duration};
 
 use log::trace;
@@ -336,7 +343,7 @@ where
 
     /// Runs a standard poll-sleep-repeat loop... asynchronously.
     #[cfg(feature = "async-std")]
-    pub async fn main_async(mut self, xcb: &self::modules::Xcb) -> Result<()> {
+    pub async fn main_async(&mut self, xcb: &self::modules::Xcb) -> Result<()> {
         loop {
             let idle = xcb.get_idle()?;
             let delay = match self.poll(idle)? {

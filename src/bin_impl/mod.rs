@@ -1,9 +1,9 @@
-#[cfg(feature = "unstable")]
-mod unstable;
 #[cfg(not(feature = "unstable"))]
 mod stable;
-
 #[cfg(feature = "unstable")]
-pub(crate) use self::unstable::*;
+mod unstable;
+
 #[cfg(not(feature = "unstable"))]
-pub(crate) use self::stable::*;
+pub use self::stable::*;
+#[cfg(feature = "unstable")]
+pub use self::unstable::*;

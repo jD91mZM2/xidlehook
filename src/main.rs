@@ -1,8 +1,4 @@
-use std::{
-    process::Command,
-    rc::Rc,
-    time::Duration,
-};
+use std::{process::Command, rc::Rc, time::Duration};
 
 use structopt::StructOpt;
 use xidlehook::{
@@ -13,20 +9,20 @@ use xidlehook::{
 
 mod bin_impl;
 
-#[derive(StructOpt)]
-struct Opt {
+#[derive(StructOpt, Debug)]
+pub struct Opt {
     /// Print the idle time to standard output. This is similar to xprintidle.
     #[structopt(long)]
-    print: bool,
+    pub print: bool,
     /// Exit after the whole chain of timer commands have been invoked
     /// once
     #[structopt(long, conflicts_with("print"))]
-    once: bool,
+    pub once: bool,
     /// Don't invoke the timer when the current application is
     /// fullscreen. Useful for preventing a lockscreen when watching
     /// videos.
     #[structopt(long, conflicts_with("print"))]
-    not_when_fullscreen: bool,
+    pub not_when_fullscreen: bool,
 
     /// The duration is the number of seconds of inactivity which
     /// should trigger this timer.
@@ -38,18 +34,18 @@ struct Opt {
     /// after the timer has gone off, but before the next timer (if
     /// any). Pass an empty string to not have one.
     #[structopt(long, conflicts_with("print"), required_unless("print"), value_names = &["duration", "command", "canceller"])]
-    timer: Vec<String>,
+    pub timer: Vec<String>,
 
     /// Don't invoke the timer when any audio is playing (PulseAudio specific)
     #[cfg(feature = "pulse")]
     #[structopt(long, conflicts_with("print"))]
-    not_when_audio: bool,
+    pub not_when_audio: bool,
 
     /// Listen to a unix socket at this address for events.
     /// Each event is one line of JSON data.
     #[cfg(feature = "unstable")]
     #[structopt(long, conflicts_with("print"))]
-    socket: Option<String>,
+    pub socket: Option<String>,
 }
 
 fn main() -> xidlehook::Result<()> {
@@ -68,8 +64,8 @@ fn main() -> xidlehook::Result<()> {
     let mut timers = Vec::new();
     let mut iter = opt.timer.iter().peekable();
     while iter.peek().is_some() {
-        // clap will ensure there are always a multiple of 3
-        let duration = match iter.next().unwrap().parse() {
+        // clap-rs will ensure there are always a multiple of 3
+        let duration: u64 = match iter.next().unwrap().parse() {
             Ok(duration) => duration,
             Err(err) => {
                 eprintln!("error: failed to parse duration as number: {}", err);

@@ -9,12 +9,7 @@ use nix::{
     libc,
     sys::{signal, wait},
 };
-use xidlehook::{
-    modules::Xcb,
-    Module,
-    Timer,
-    Xidlehook,
-};
+use xidlehook::{modules::Xcb, Module, Timer, Xidlehook};
 
 static EXITED: AtomicBool = AtomicBool::new(false);
 
@@ -26,7 +21,7 @@ extern "C" fn sigchld_handler(_signo: libc::c_int) {
     let _ = wait::waitpid(None, Some(wait::WaitPidFlag::WNOHANG));
 }
 
-pub(crate) fn main_loop<T, M>(_opt: Opt, xidlehook: Xidlehook<T, M>, xcb: Rc<Xcb>) -> xidlehook::Result<()>
+pub fn main_loop<T, M>(_opt: Opt, xidlehook: Xidlehook<T, M>, xcb: Rc<Xcb>) -> xidlehook::Result<()>
 where
     T: Timer,
     M: Module,

@@ -1,8 +1,5 @@
 use std::{cell::Cell, time::Duration};
-use xidlehook::{
-    timers::CallbackTimer,
-    Xidlehook,
-};
+use xidlehook::{timers::CallbackTimer, Xidlehook};
 
 const TEST_UNIT: Duration = Duration::from_millis(50);
 
@@ -12,8 +9,8 @@ fn general_timer_test() {
 
     let mut timer = Xidlehook::new(vec![
         CallbackTimer::new(TEST_UNIT * 100, || triggered.set(triggered.get() | 1)),
-        CallbackTimer::new(TEST_UNIT * 10,  || triggered.set(triggered.get() | 1 << 1)),
-        CallbackTimer::new(TEST_UNIT * 50,  || triggered.set(triggered.get() | 1 << 2)),
+        CallbackTimer::new(TEST_UNIT * 10, || triggered.set(triggered.get() | 1 << 1)),
+        CallbackTimer::new(TEST_UNIT * 50, || triggered.set(triggered.get() | 1 << 2)),
         CallbackTimer::new(TEST_UNIT * 200, || triggered.set(triggered.get() | 1 << 3)),
     ]);
 
