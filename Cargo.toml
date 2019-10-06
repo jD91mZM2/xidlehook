@@ -7,13 +7,19 @@ name = "xidlehook"
 readme = "README.md"
 repository = "https://github.com/jD91mZM2/xidlehook"
 version = "0.8.0"
-default-run = "xidlehook"
 
 [dependencies]
-log = "0.4.8"
-structopt = "0.3.2"
+# For unstable
+async-std = { version = "0.99.8", optional = true }
+futures-preview = { version = "0.3.0-alpha.18", optional = true }
+serde_json = { version = "1.0.41", optional = true }
+
+# For stable
 env_logger = "0.7.0"
+log = "0.4.8"
 nix = "0.15.0"
+structopt = "0.3.2"
+xcb = { version = "0.8.2", features = ["x11", "screensaver"] }
 
 [dependencies.libpulse-binding]
 optional = true
@@ -21,10 +27,7 @@ version = "2.6.0"
 default-features = false
 features = ["pa_v12_compatibility"]
 
-[dependencies.xcb]
-features = ["x11", "screensaver"]
-version = "0.8.2"
-
 [features]
 default = ["pulse"]
+unstable = ["async-std", "futures-preview", "serde_json"]
 pulse = ["libpulse-binding"]

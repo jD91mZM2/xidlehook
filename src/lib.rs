@@ -79,8 +79,8 @@ where
     }
 
     /// Return this xidlehook instance but with an additional module
-    /// activated. This works using the `Combine<A, B>` type to get a
-    /// fixed-size list of modules at compile time.
+    /// activated. This works using the timer impl for `(A, B)` to get
+    /// a fixed-size list of modules at compile time.
     pub fn register<N: Module>(self, other: N) -> Xidlehook<T, (M, N)> {
         // Sadly cannot use `self.with_module` safely due to use of
         // `self.module` - Rust isn't intelligent enough to realize
@@ -260,18 +260,59 @@ where
         Ok(Some(max_sleep))
     }
 
-    /// Runs a standard poll-sleep-repeat loop
-    pub fn main<F>(mut self, xcb: &self::modules::Xcb, mut callback: F) -> Result<()>
+    /// Runs a standard poll-sleep-repeat loop.
+    /// ```rust
+    /// # use std::{
+    /// #     sync::atomic::{AtomicBool, Ordering},
+    /// #     time::Duration,
+    /// # };
+    /// #
+    /// # use nix::{
+    /// #     libc,
+    /// #     sys::{signal, wait},
+    /// # };
+    /// # use xidlehook::{
+    /// #     modules::{StopAt, Xcb},
+    /// #     timers::CallbackTimer,
+    /// #     Xidlehook,
+    /// # };
+    /// #
+    /// # let timers = vec![
+    /// #     CallbackTimer::new(Duration::from_millis(50), || println!("50ms passed!")),
+    /// # ];
+    /// # let mut xidlehook = Xidlehook::new(timers)
+    /// #     .register(StopAt::completion());
+    /// # let xcb = Xcb::new()?;
+    /// static EXITED: AtomicBool = AtomicBool::new(false);
+    ///
+    /// extern "C" fn exit_handler(_signo: libc::c_int) {
+    ///     EXITED.store(true, Ordering::SeqCst);
+    /// }
+    ///
+    /// unsafe {
+    ///     signal::sigaction(
+    ///         signal::Signal::SIGINT,
+    ///         &signal::SigAction::new(
+    ///             signal::SigHandler::Handler(exit_handler),
+    ///             signal::SaFlags::empty(),
+    ///             signal::SigSet::empty(),
+    ///         ),
+    ///     )?;
+    /// }
+    /// xidlehook.main_sync(&xcb, || EXITED.load(Ordering::SeqCst));
+    /// # Ok::<(), xidlehook::Error>(())
+    /// ```
+    pub fn main_sync<F>(mut self, xcb: &self::modules::Xcb, mut callback: F) -> Result<()>
     where
         F: FnMut() -> bool,
     {
         loop {
             let idle = xcb.get_idle()?;
-
             let delay = match self.poll(idle)? {
                 Some(delay) => delay,
                 None => break,
             };
+
             trace!("Sleeping for {:?}", delay);
 
             // This sleep, unlike `thread::sleep`, will stop for signals.
@@ -289,6 +330,22 @@ where
                 // Oh look, the callback wants us to exit
                 break;
             }
+        }
+        Ok(())
+    }
+
+    /// Runs a standard poll-sleep-repeat loop... asynchronously.
+    #[cfg(feature = "async-std")]
+    pub async fn main_async(mut self, xcb: &self::modules::Xcb) -> Result<()> {
+        loop {
+            let idle = xcb.get_idle()?;
+            let delay = match self.poll(idle)? {
+                Some(delay) => delay,
+                None => break,
+            };
+
+            trace!("Sleeping for {:?}", delay);
+            async_std::task::sleep(delay).await;
         }
         Ok(())
     }

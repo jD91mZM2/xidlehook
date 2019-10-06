@@ -1,45 +1,20 @@
 use std::{cell::Cell, time::Duration};
-use xidlehook::{Result, Timer, Xidlehook};
+use xidlehook::{
+    timers::CallbackTimer,
+    Xidlehook,
+};
 
 const TEST_UNIT: Duration = Duration::from_millis(50);
-
-struct TestTimer<'a> {
-    time: Duration,
-    f: Box<dyn FnMut() + 'a>,
-}
-impl<'a> TestTimer<'a> {
-    pub fn new<F>(time: u32, f: F) -> Self
-    where
-        F: FnMut() + 'a,
-    {
-        Self {
-            time: TEST_UNIT * time,
-            f: Box::new(f),
-        }
-    }
-}
-impl<'a> Timer for TestTimer<'a> {
-    fn time_left(&mut self, idle_time: Duration) -> Result<Option<Duration>> {
-        Ok(self
-            .time
-            .checked_sub(idle_time)
-            .filter(|&d| d != Duration::default()))
-    }
-    fn activate(&mut self) -> Result<()> {
-        (self.f)();
-        Ok(())
-    }
-}
 
 #[test]
 fn general_timer_test() {
     let triggered = Cell::new(0);
 
     let mut timer = Xidlehook::new(vec![
-        TestTimer::new(100, || triggered.set(triggered.get() | 1)),
-        TestTimer::new(10, || triggered.set(triggered.get() | 1 << 1)),
-        TestTimer::new(50, || triggered.set(triggered.get() | 1 << 2)),
-        TestTimer::new(200, || triggered.set(triggered.get() | 1 << 3)),
+        CallbackTimer::new(TEST_UNIT * 100, || triggered.set(triggered.get() | 1)),
+        CallbackTimer::new(TEST_UNIT * 10,  || triggered.set(triggered.get() | 1 << 1)),
+        CallbackTimer::new(TEST_UNIT * 50,  || triggered.set(triggered.get() | 1 << 2)),
+        CallbackTimer::new(TEST_UNIT * 200, || triggered.set(triggered.get() | 1 << 3)),
     ]);
 
     // Test first timer

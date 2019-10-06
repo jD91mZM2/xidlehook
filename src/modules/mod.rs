@@ -125,12 +125,12 @@ impl<M: Module> Module for Vec<M> {
     }
 }
 
-pub mod once;
+pub mod stop_at;
 #[cfg(feature = "pulse")]
 pub mod pulse;
 pub mod xcb;
 
-pub use self::once::StopAt;
+pub use self::stop_at::StopAt;
 #[cfg(feature = "pulse")]
 pub use self::pulse::NotWhenAudio;
 pub use self::xcb::Xcb;

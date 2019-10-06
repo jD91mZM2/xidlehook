@@ -1,20 +1,17 @@
 use std::{
     process::Command,
     rc::Rc,
-    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 
-use nix::{
-    libc,
-    sys::{signal, wait},
-};
 use structopt::StructOpt;
 use xidlehook::{
     modules::{Module, StopAt, Xcb},
     timers::CmdTimer,
     Xidlehook,
 };
+
+mod bin_impl;
 
 #[derive(StructOpt)]
 struct Opt {
@@ -47,16 +44,12 @@ struct Opt {
     #[cfg(feature = "pulse")]
     #[structopt(long, conflicts_with("print"))]
     not_when_audio: bool,
-}
 
-static EXITED: AtomicBool = AtomicBool::new(false);
-
-extern "C" fn exit_handler(_signo: libc::c_int) {
-    EXITED.store(true, Ordering::SeqCst);
-}
-
-extern "C" fn sigchld_handler(_signo: libc::c_int) {
-    let _ = wait::waitpid(None, Some(wait::WaitPidFlag::WNOHANG));
+    /// Listen to a unix socket at this address for events.
+    /// Each event is one line of JSON data.
+    #[cfg(feature = "unstable")]
+    #[structopt(long, conflicts_with("print"))]
+    socket: Option<String>,
 }
 
 fn main() -> xidlehook::Result<()> {
@@ -91,38 +84,14 @@ fn main() -> xidlehook::Result<()> {
         });
     }
 
-    unsafe {
-        for &(signal, handler) in &[
-            (
-                signal::Signal::SIGINT,
-                exit_handler as extern "C" fn(libc::c_int),
-            ),
-            (
-                signal::Signal::SIGCHLD,
-                sigchld_handler as extern "C" fn(libc::c_int),
-            ),
-        ] {
-            signal::sigaction(
-                signal,
-                &signal::SigAction::new(
-                    signal::SigHandler::Handler(handler),
-                    signal::SaFlags::empty(),
-                    signal::SigSet::empty(),
-                ),
-            )?;
-        }
-    }
-
     let mut modules: Vec<Box<dyn Module>> = Vec::new();
 
     if opt.once {
         modules.push(Box::new(StopAt::completion()));
     }
-
     if opt.not_when_fullscreen {
         modules.push(Box::new(Rc::clone(&xcb).not_when_fullscreen()));
     }
-
     #[cfg(feature = "pulse")]
     {
         if opt.not_when_audio {
@@ -130,9 +99,9 @@ fn main() -> xidlehook::Result<()> {
         }
     }
 
-    Xidlehook::new(timers)
-        .register(modules)
-        .main(&xcb, || EXITED.load(Ordering::SeqCst))?;
+    let xidlehook = Xidlehook::new(timers).register(modules);
+
+    bin_impl::main_loop(opt, xidlehook, xcb)?;
 
     Ok(())
 }

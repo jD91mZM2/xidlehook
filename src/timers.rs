@@ -27,7 +27,7 @@ pub trait Timer {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct CmdTimer {
     pub time: Duration,
     pub activation: Option<Command>,
@@ -64,3 +64,57 @@ impl Timer for CmdTimer {
         Ok(())
     }
 }
+
+/// A timer that lets you easily execute a rust callback on
+/// activation
+pub struct CallbackTimer<F>
+where
+    F: FnMut()
+{
+    time: Duration,
+    f: F,
+}
+impl<'a> CallbackTimer<Box<dyn FnMut() + 'a>> {
+    /// Create a new instance, which boxes the closure to a dynamic
+    /// type. Use `new_unboxed` to use static dispatch, although keep
+    /// in mind this will potentially make you unable to register more
+    /// than one type of callback timer due to its static type.
+    pub fn new<F>(time: Duration, f: F) -> Self
+    where
+        F: FnMut() + 'a
+    {
+        Self::new_unboxed(time, Box::new(f))
+    }
+}
+impl<F> CallbackTimer<F>
+where
+    F: FnMut()
+{
+    /// Create a new unboxed instance. Due to it's static type, only
+    /// one type can be used. This means that registering 2 timers
+    /// with 2 different callbacks will conflict. An easy way to
+    /// bypass this is using the `new` function, which behind the
+    /// scenes just wraps the callback in a Box.
+    ///
+    /// TL;DR: Don't use this unless you're planning on using another
+    /// means of dynamic dispatch (an enum?) or if you're a masochist.
+    pub fn new_unboxed(time: Duration, f: F) -> Self {
+        Self { time, f }
+    }
+}
+impl<F> Timer for CallbackTimer<F>
+where
+    F: FnMut()
+{
+    fn time_left(&mut self, idle_time: Duration) -> Result<Option<Duration>> {
+        Ok(self
+            .time
+            .checked_sub(idle_time)
+            .filter(|&d| d != Duration::default()))
+    }
+    fn activate(&mut self) -> Result<()> {
+        (self.f)();
+        Ok(())
+    }
+}
+
