@@ -1,3 +1,7 @@
+//! Minimal xidlehook shell command, aiming to be small and
+//! modular. In a way, this is more of an example of how to implement
+//! your own xidlehook-based client than an actual implementation.
+
 use std::{
     process::Command,
     rc::Rc,
@@ -13,7 +17,7 @@ use structopt::StructOpt;
 use xidlehook::{
     modules::{StopAt, Xcb},
     timers::CmdTimer,
-    Module, Timer, Xidlehook,
+    Module, Xidlehook,
 };
 
 static EXITED: AtomicBool = AtomicBool::new(false);
@@ -28,18 +32,20 @@ extern "C" fn sigchld_handler(_signo: libc::c_int) {
 
 #[derive(StructOpt, Debug)]
 pub struct Opt {
-    /// Print the idle time to standard output. This is similar to xprintidle.
-    #[structopt(long)]
-    pub print: bool,
     /// Exit after the whole chain of timer commands have been invoked
     /// once
-    #[structopt(long, conflicts_with("print"))]
+    #[structopt(long)]
     pub once: bool,
     /// Don't invoke the timer when the current application is
     /// fullscreen. Useful for preventing a lockscreen when watching
     /// videos.
-    #[structopt(long, conflicts_with("print"))]
+    #[structopt(long)]
     pub not_when_fullscreen: bool,
+    /// Don't invoke the timer when any audio is playing (only
+    /// compatible with PulseAudio)
+    #[cfg(feature = "pulse")]
+    #[structopt(long)]
+    pub not_when_audio: bool,
 
     /// The duration is the number of seconds of inactivity which
     /// should trigger this timer.
@@ -50,19 +56,8 @@ pub struct Opt {
     /// The canceller is what is invoked when the user becomes active
     /// after the timer has gone off, but before the next timer (if
     /// any). Pass an empty string to not have one.
-    #[structopt(long, conflicts_with("print"), required_unless("print"), value_names = &["duration", "command", "canceller"])]
+    #[structopt(long, required = true, value_names = &["duration", "command", "canceller"])]
     pub timer: Vec<String>,
-
-    /// Don't invoke the timer when any audio is playing (PulseAudio specific)
-    #[cfg(feature = "pulse")]
-    #[structopt(long, conflicts_with("print"))]
-    pub not_when_audio: bool,
-
-    /// Listen to a unix socket at this address for events.
-    /// Each event is one line of JSON data.
-    #[cfg(feature = "unstable")]
-    #[structopt(long, conflicts_with("print"))]
-    pub socket: Option<String>,
 }
 
 fn main() -> xidlehook::Result<()> {
@@ -71,12 +66,6 @@ fn main() -> xidlehook::Result<()> {
     let opt = Opt::from_args();
 
     let xcb = Rc::new(Xcb::new()?);
-
-    if opt.print {
-        let idle = xcb.get_idle()?;
-        println!("{}", idle.as_millis());
-        return Ok(());
-    }
 
     let mut timers = Vec::new();
     let mut iter = opt.timer.iter().peekable();

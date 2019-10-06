@@ -2,7 +2,7 @@
 
 set -e
 
-cargo +beta run --features unstable -- \
+cargo +beta run -- \
       --timer 2 "echo 2" "" \
       --timer 1 "echo 3" "" \
       --timer 1 "echo 4" "" \

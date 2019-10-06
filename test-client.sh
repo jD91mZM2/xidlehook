@@ -2,7 +2,7 @@
 
 set -e
 
-alias woot='cargo +beta run --features unstable --bin xidlehook-client -- --socket "/tmp/xidlehook-test.sock"'
+alias woot='cargo +beta run --bin xidlehook-client -- --socket "/tmp/xidlehook-test.sock"'
 
 woot add \
       --duration 10 \

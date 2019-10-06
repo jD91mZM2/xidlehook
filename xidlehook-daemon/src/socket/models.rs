@@ -55,3 +55,17 @@ pub enum Message {
     Control(Control),
     Query(Query),
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct QueryResult {
+    pub timer: TimerId,
+    pub activation: Vec<String>,
+    pub abortion: Vec<String>,
+    pub deactivation: Vec<String>,
+}
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum Reply {
+    Empty,
+    QueryResult(Vec<QueryResult>),
+}

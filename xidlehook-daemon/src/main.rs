@@ -1,7 +1,7 @@
 use std::{fs, process::Command, rc::Rc, time::Duration};
 
 use async_std::{future::select, task};
-use futures::{channel::mpsc, prelude::*};
+use futures::{channel::{mpsc, oneshot}, prelude::*};
 use log::{trace, warn};
 use nix::{libc, sys::signal::Signal};
 use structopt::StructOpt;
@@ -12,8 +12,7 @@ use xidlehook::{
 };
 
 mod signal_handler;
-mod socket_api;
-mod socket_models;
+mod socket;
 
 struct Defer<F: FnMut()>(F);
 impl<F: FnMut()> Drop for Defer<F> {
@@ -114,7 +113,7 @@ fn main() -> xidlehook::Result<()> {
         {
             let address = address.clone();
             task::spawn(async move {
-                if let Err(err) = socket_api::socket_loop(&address, socket_tx).await {
+                if let Err(err) = socket::socket_loop(&address, socket_tx).await {
                     warn!("Socket handling errored: {}", err);
                 }
             });
@@ -132,24 +131,31 @@ fn main() -> xidlehook::Result<()> {
 
     loop {
         enum Selected {
-            Socket(Option<socket_models::Message>),
+            Socket(Option<(socket::Message, oneshot::Sender<socket::Reply>)>),
             Signal(Option<Signal>),
             Exit(xidlehook::Result<()>),
         }
+
         let a = socket_rx.next().map(Selected::Socket);
         let b = signal_rx.next().map(Selected::Signal);
         let c = xidlehook.main_async(&xcb).map(Selected::Exit);
         let res = task::block_on(select!(a, b, c));
+
         match res {
-            Selected::Socket(msg) => {
-                if let Some(msg) = msg {
+            Selected::Socket(data) => {
+                if let Some((msg, reply)) = data {
                     trace!("Got command over socket: {:#?}", msg);
+                    reply.send(socket::Reply::Empty).unwrap();
+                } else {
+                    // TODO: Don't poll socket_rx again after this
                 }
             },
             Selected::Signal(sig) => {
                 if let Some(sig) = sig {
                     trace!("Signal received: {}", sig);
                     break;
+                } else {
+                    // TODO: Don't poll signal_rx again after this
                 }
             },
             Selected::Exit(res) => {

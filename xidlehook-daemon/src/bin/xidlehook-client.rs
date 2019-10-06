@@ -1,12 +1,11 @@
-use std::{io::prelude::*, os::unix::net::UnixStream, time::Duration};
+use std::{io::{prelude::*, BufReader, LineWriter}, os::unix::net::UnixStream, time::Duration};
 
 use structopt::{clap::arg_enum, StructOpt};
 
 #[allow(dead_code)]
-mod socket_models {
-    include!("../bin_impl/unstable/socket_models.rs");
+mod socket {
+    include!("../socket/models.rs");
 }
-use self::socket_models::TimerId;
 
 arg_enum! {
     #[derive(Debug)]
@@ -39,7 +38,7 @@ enum Subcommands {
         /// Where to insert this timer. To insert it at the beginning,
         /// set this to 0. To insert it at the end, skip this.
         #[structopt(long)]
-        index: Option<TimerId>,
+        index: Option<socket::TimerId>,
         /// The shell command to run on activation, *not* passed to
         /// "sh -c" (unlike the regular application)
         #[structopt(long, value_terminator = ";", allow_hyphen_values = true)]
@@ -61,7 +60,7 @@ enum Subcommands {
         /// The timers which this operation should apply to. Leave
         /// empty for all timers.
         #[structopt(long)]
-        timer: Vec<TimerId>,
+        timer: Vec<socket::TimerId>,
         /// Which action to cause on the selected timers
         #[structopt(long, possible_values = &OptAction::variants(), case_insensitive = true)]
         action: OptAction,
@@ -71,15 +70,15 @@ enum Subcommands {
         /// The timers which this operation should apply to. Leave
         /// empty for all timers.
         #[structopt(long)]
-        timer: Vec<TimerId>,
+        timer: Vec<socket::TimerId>,
     },
 }
 
-fn filter(filter: Vec<TimerId>) -> socket_models::Filter {
+fn filter(filter: Vec<socket::TimerId>) -> socket::Filter {
     if filter.is_empty() {
-        socket_models::Filter::Any
+        socket::Filter::Any
     } else {
-        socket_models::Filter::Selected(filter)
+        socket::Filter::Selected(filter)
     }
 }
 
@@ -92,7 +91,7 @@ fn main() -> xidlehook::Result<()> {
             activation,
             abortion,
             deactivation,
-        } => socket_models::Message::Add(socket_models::Add {
+        } => socket::Message::Add(socket::Add {
             duration: Duration::from_secs(duration),
             index,
             activation,
@@ -100,24 +99,38 @@ fn main() -> xidlehook::Result<()> {
             deactivation,
         }),
         Subcommands::Control { timer, action } => {
-            socket_models::Message::Control(socket_models::Control {
+            socket::Message::Control(socket::Control {
                 timer: filter(timer),
                 action: match action {
-                    OptAction::Enable => socket_models::Action::Enable,
-                    OptAction::Disable => socket_models::Action::Disable,
-                    OptAction::Trigger => socket_models::Action::Trigger,
-                    OptAction::Delete => socket_models::Action::Delete,
+                    OptAction::Enable => socket::Action::Enable,
+                    OptAction::Disable => socket::Action::Disable,
+                    OptAction::Trigger => socket::Action::Trigger,
+                    OptAction::Delete => socket::Action::Delete,
                 },
             })
         },
-        Subcommands::Query { timer } => socket_models::Message::Query(socket_models::Query {
+        Subcommands::Query { timer } => socket::Message::Query(socket::Query {
             timer: filter(timer),
         }),
     };
 
-    let mut stream = UnixStream::connect(opt.socket)?;
-    let json = serde_json::to_string(&packet)?;
-    stream.write_all(json.as_bytes())?;
+    let stream = UnixStream::connect(opt.socket)?;
+    let mut reader = BufReader::new(&stream);
+    let mut writer = LineWriter::new(&stream);
+
+    dbg!();
+    serde_json::to_writer(&mut writer, &packet)?;
+    dbg!();
+    writer.write_all(&[b'\n'])?;
+    dbg!();
+    writer.flush()?;
+    dbg!();
+
+    // TODO: This blocks forever
+    let reply: socket::Reply = serde_json::from_reader(&mut reader)?;
+    dbg!();
+
+    println!("{:#?}", reply);
 
     Ok(())
 }
