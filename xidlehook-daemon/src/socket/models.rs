@@ -7,13 +7,22 @@ pub type TimerId = u16;
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum Filter {
-    Any,
+    All,
     Selected(Vec<TimerId>),
     One(TimerId),
 }
 impl Default for Filter {
     fn default() -> Self {
-        Self::Any
+        Self::All
+    }
+}
+impl Filter {
+    pub fn iter(&'_ self, len: TimerId) -> Box<dyn Iterator<Item = TimerId> + '_> {
+        match *self {
+            Self::All => Box::new(0..len),
+            Self::Selected(ref ids) => Box::new(ids.iter().copied()),
+            Self::One(id) => Box::new(std::iter::once(id)),
+        }
     }
 }
 
@@ -28,8 +37,8 @@ pub enum Action {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Add {
-    pub duration: Duration,
     pub index: Option<TimerId>,
+    pub time: Duration,
     pub activation: Vec<String>,
     pub abortion: Vec<String>,
     pub deactivation: Vec<String>,
@@ -62,10 +71,12 @@ pub struct QueryResult {
     pub activation: Vec<String>,
     pub abortion: Vec<String>,
     pub deactivation: Vec<String>,
+    pub disabled: bool,
 }
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum Reply {
     Empty,
+    Error(String),
     QueryResult(Vec<QueryResult>),
 }

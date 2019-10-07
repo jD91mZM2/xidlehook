@@ -105,10 +105,7 @@ where
     /// remove timers as you wish. This will abort the idle chain as
     /// that may otherwise panic.
     pub fn timers_mut(&mut self) -> Result<&mut Vec<T>> {
-        // Reset the timers, but set the timer relative to this reset
-        // time.
         self.abort()?;
-
         Ok(&mut self.timers)
     }
 
@@ -236,18 +233,25 @@ where
                     },
                 }
 
-                self.next_index += 1;
                 self.base_idle_time = absolute_time;
                 // From now on, `relative_time` is invalid. Don't use it.
 
-                if let Some(next) = self.timers.get_mut(self.next_index) {
-                    if let Some(remaining) = next.time_left(Duration::default())? {
-                        trace!(
-                            "Taking next-next timer into account. Remaining: {:?}",
-                            remaining
-                        );
-                        max_sleep = cmp::min(max_sleep, remaining);
+                loop {
+                    self.next_index += 1;
+
+                    if let Some(next) = self.timers.get_mut(self.next_index) {
+                        if next.disabled() {
+                            continue;
+                        }
+                        if let Some(remaining) = next.time_left(Duration::default())? {
+                            trace!(
+                                "Taking next-next timer into account. Remaining: {:?}",
+                                remaining
+                            );
+                            max_sleep = cmp::min(max_sleep, remaining);
+                        }
                     }
+                    break;
                 }
             }
         }

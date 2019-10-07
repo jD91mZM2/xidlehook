@@ -6,7 +6,7 @@ use log::{trace, warn};
 
 mod models;
 
-pub use self::models::{Message, Reply};
+pub use self::models::*;
 
 pub async fn socket_loop(
     address: &str,
@@ -24,7 +24,7 @@ pub async fn socket_loop(
             let reader = BufReader::new(&stream);
             let mut writer = BufWriter::new(&stream);
             let mut lines = reader.lines();
-            while let Some(msg) = { trace!("Reading..."); lines.next().await } {
+            while let Some(msg) = lines.next().await {
                 let res = msg
                     .map_err(|err| err.to_string())
                     .and_then(|msg| serde_json::from_str(&msg).map_err(|err| err.to_string()));
@@ -43,7 +43,6 @@ pub async fn socket_loop(
                 let reply = reply_rx.await.unwrap();
 
                 let res = async {
-                    trace!("Writing...");
                     let msg = serde_json::to_vec(&reply)?;
                     writer.write_all(&msg).await?;
                     writer.write_all(&[b'\n']).await?;

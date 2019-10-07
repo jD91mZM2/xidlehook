@@ -1,7 +1,7 @@
 use std::{fs, process::Command, rc::Rc, time::Duration};
 
 use async_std::{future::select, task};
-use futures::{channel::{mpsc, oneshot}, prelude::*};
+use futures::{channel::{mpsc, oneshot}, future, prelude::*};
 use log::{trace, warn};
 use nix::{libc, sys::signal::Signal};
 use structopt::StructOpt;
@@ -108,7 +108,7 @@ fn main() -> xidlehook::Result<()> {
 
     let mut xidlehook = Xidlehook::new(timers).register(modules);
 
-    let (socket_tx, mut socket_rx) = mpsc::channel(4);
+    let (socket_tx, socket_rx) = mpsc::channel(4);
     let _scope = if let Some(address) = opt.socket {
         {
             let address = address.clone();
@@ -126,8 +126,11 @@ fn main() -> xidlehook::Result<()> {
         None
     };
 
-    let (signal_tx, mut signal_rx) = mpsc::channel(1);
+    let (signal_tx, signal_rx) = mpsc::channel(1);
     let signal_thread = signal_handler::handle_signals(signal_tx)?;
+
+    let mut socket_rx = Some(socket_rx);
+    let mut signal_rx = Some(signal_rx);
 
     loop {
         enum Selected {
@@ -136,8 +139,15 @@ fn main() -> xidlehook::Result<()> {
             Exit(xidlehook::Result<()>),
         }
 
-        let a = socket_rx.next().map(Selected::Socket);
-        let b = signal_rx.next().map(Selected::Signal);
+        let a = socket_rx
+            .as_mut()
+            .map(|rx| -> Box<dyn Future<Output = _> + Unpin> { Box::new(rx.next().map(Selected::Socket)) })
+            .unwrap_or_else(|| Box::new(future::pending()));
+        let b = signal_rx
+            .as_mut()
+            .map(|rx| -> Box<dyn Future<Output = _> + Unpin> { Box::new(rx.next().map(Selected::Signal)) })
+            .unwrap_or_else(|| Box::new(future::pending()));
+
         let c = xidlehook.main_async(&xcb).map(Selected::Exit);
         let res = task::block_on(select!(a, b, c));
 
@@ -145,9 +155,93 @@ fn main() -> xidlehook::Result<()> {
             Selected::Socket(data) => {
                 if let Some((msg, reply)) = data {
                     trace!("Got command over socket: {:#?}", msg);
-                    reply.send(socket::Reply::Empty).unwrap();
+                    let response = match msg {
+                        socket::Message::Add(add) => {
+                            let timers = xidlehook.timers_mut()?;
+
+                            let index = add.index.map(usize::from).unwrap_or(timers.len());
+                            if index > timers.len() {
+                                socket::Reply::Error(String::from("index > length"))
+                            } else {
+                                timers.insert(index, CmdTimer {
+                                    time: add.time,
+                                    activation: if add.activation.is_empty() {
+                                        None
+                                    } else {
+                                        let mut activation = Command::new(&add.activation[0]);
+                                        activation.args(&add.activation[1..]);
+                                        Some(activation)
+                                    },
+                                    abortion: if add.abortion.is_empty() {
+                                        None
+                                    } else {
+                                        let mut abortion = Command::new(&add.abortion[0]);
+                                        abortion.args(&add.abortion[1..]);
+                                        Some(abortion)
+                                    },
+                                    deactivation: if add.deactivation.is_empty() {
+                                        None
+                                    } else {
+                                        let mut deactivation = Command::new(&add.deactivation[0]);
+                                        deactivation.args(&add.deactivation[1..]);
+                                        Some(deactivation)
+                                    },
+                                    disabled: false,
+                                });
+                                socket::Reply::Empty
+                            }
+                        },
+                        socket::Message::Control(control) => {
+                            let timers = xidlehook.timers_mut()?;
+
+                            let mut removed = 0;
+                            for id in control.timer.iter(timers.len() as socket::TimerId) {
+                                let id = usize::from(id - removed);
+                                if id >= timers.len() {
+                                    continue;
+                                }
+
+                                match control.action {
+                                    socket::Action::Disable => timers[id].disabled = true,
+                                    socket::Action::Enable => timers[id].disabled = false,
+                                    socket::Action::Trigger => unimplemented!(),
+                                    socket::Action::Delete => {
+                                        // Probably want to use `retain` to optimize this...
+                                        timers.remove(id);
+                                        removed += 1;
+                                    }
+                                }
+                            }
+
+                            socket::Reply::Empty
+                        },
+                        socket::Message::Query(query) => {
+                            let timers = xidlehook.timers();
+                            let mut output = Vec::new();
+
+                            for id in query.timer.iter(timers.len() as socket::TimerId) {
+                                let timer = match timers.get(usize::from(id)) {
+                                    Some(timer) => timer,
+                                    None => continue,
+                                };
+                                output.push(socket::QueryResult {
+                                    timer: id,
+                                    activation: Vec::new(), // TODO
+                                    abortion: Vec::new(), // TODO
+                                    deactivation: Vec::new(), // TODO
+                                    // activation: timer.activation.clone(),
+                                    // abortion: timer.abortion.clone(),
+                                    // deactivation: timer.deactivation.clone(),
+                                    disabled: timer.disabled,
+                                });
+                            }
+
+                            socket::Reply::QueryResult(output)
+                        },
+                    };
+                    reply.send(response).unwrap();
                 } else {
-                    // TODO: Don't poll socket_rx again after this
+                    socket_rx = None;
                 }
             },
             Selected::Signal(sig) => {
@@ -155,7 +249,7 @@ fn main() -> xidlehook::Result<()> {
                     trace!("Signal received: {}", sig);
                     break;
                 } else {
-                    // TODO: Don't poll signal_rx again after this
+                    signal_rx = None;
                 }
             },
             Selected::Exit(res) => {

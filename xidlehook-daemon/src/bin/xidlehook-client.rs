@@ -32,9 +32,10 @@ struct Opt {
 enum Subcommands {
     /// Create a new timer
     Add {
-        /// The duration of the timer
+        /// The desired idle time, in seconds, which the timer will go
+        /// off after
         #[structopt(long)]
-        duration: u64,
+        time: u64,
         /// Where to insert this timer. To insert it at the beginning,
         /// set this to 0. To insert it at the end, skip this.
         #[structopt(long)]
@@ -76,7 +77,7 @@ enum Subcommands {
 
 fn filter(filter: Vec<socket::TimerId>) -> socket::Filter {
     if filter.is_empty() {
-        socket::Filter::Any
+        socket::Filter::All
     } else {
         socket::Filter::Selected(filter)
     }
@@ -86,13 +87,13 @@ fn main() -> xidlehook::Result<()> {
     let opt = Opt::from_args();
     let packet = match opt.cmd {
         Subcommands::Add {
-            duration,
+            time,
             index,
             activation,
             abortion,
             deactivation,
         } => socket::Message::Add(socket::Add {
-            duration: Duration::from_secs(duration),
+            time: Duration::from_secs(time),
             index,
             activation,
             abortion,
@@ -115,22 +116,17 @@ fn main() -> xidlehook::Result<()> {
     };
 
     let stream = UnixStream::connect(opt.socket)?;
-    let mut reader = BufReader::new(&stream);
+    let reader = BufReader::new(&stream);
     let mut writer = LineWriter::new(&stream);
 
-    dbg!();
     serde_json::to_writer(&mut writer, &packet)?;
-    dbg!();
     writer.write_all(&[b'\n'])?;
-    dbg!();
     writer.flush()?;
-    dbg!();
 
-    // TODO: This blocks forever
-    let reply: socket::Reply = serde_json::from_reader(&mut reader)?;
-    dbg!();
-
-    println!("{:#?}", reply);
+    if let Some(line) = reader.lines().next() {
+        let reply: socket::Reply = serde_json::from_str(&line?)?;
+        println!("{:#?}", reply);
+    }
 
     Ok(())
 }

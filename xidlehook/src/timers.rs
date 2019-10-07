@@ -25,6 +25,13 @@ pub trait Timer {
     fn deactivate(&mut self) -> Result<()> {
         Ok(())
     }
+    /// Return true if the timer is disabled and should be
+    /// skipped. This function is called immediately after the
+    /// previous timer is triggered, so any changes since then aren't
+    /// reflected.
+    fn disabled(&mut self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Default)]
@@ -33,6 +40,7 @@ pub struct CmdTimer {
     pub activation: Option<Command>,
     pub abortion: Option<Command>,
     pub deactivation: Option<Command>,
+    pub disabled: bool,
 }
 impl Timer for CmdTimer {
     fn time_left(&mut self, idle_time: Duration) -> Result<Option<Duration>> {
@@ -62,6 +70,9 @@ impl Timer for CmdTimer {
             deactivation.spawn()?;
         }
         Ok(())
+    }
+    fn disabled(&mut self) -> bool {
+        self.disabled
     }
 }
 
