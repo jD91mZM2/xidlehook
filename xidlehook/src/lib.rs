@@ -166,7 +166,12 @@ where
     /// # Panics
     ///
     /// - If the index is out of bounds
-    pub fn trigger(&mut self, index: usize, absolute_time: Duration, force: bool) -> Result<Progress> {
+    pub fn trigger(
+        &mut self,
+        index: usize,
+        absolute_time: Duration,
+        force: bool,
+    ) -> Result<Progress> {
         trace!("Activating timer {}", index);
 
         let timer_info = TimerInfo {

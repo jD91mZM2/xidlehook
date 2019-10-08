@@ -1,7 +1,11 @@
 use std::{fs, rc::Rc, time::Duration};
 
 use async_std::{future::select, task};
-use futures::{channel::{mpsc, oneshot}, future, prelude::*};
+use futures::{
+    channel::{mpsc, oneshot},
+    future,
+    prelude::*,
+};
 use log::{trace, warn};
 use nix::{libc, sys::signal::Signal};
 use structopt::StructOpt;
@@ -113,7 +117,8 @@ fn main() -> xidlehook::Result<()> {
         opt,
         xcb,
         xidlehook,
-    }.main_loop()
+    }
+    .main_loop()
 }
 
 struct App {
@@ -156,11 +161,15 @@ impl App {
 
             let a = socket_rx
                 .as_mut()
-                .map(|rx| -> Box<dyn Future<Output = _> + Unpin> { Box::new(rx.next().map(Selected::Socket)) })
+                .map(|rx| -> Box<dyn Future<Output = _> + Unpin> {
+                    Box::new(rx.next().map(Selected::Socket))
+                })
                 .unwrap_or_else(|| Box::new(future::pending()));
             let b = signal_rx
                 .as_mut()
-                .map(|rx| -> Box<dyn Future<Output = _> + Unpin> { Box::new(rx.next().map(Selected::Signal)) })
+                .map(|rx| -> Box<dyn Future<Output = _> + Unpin> {
+                    Box::new(rx.next().map(Selected::Signal))
+                })
                 .unwrap_or_else(|| Box::new(future::pending()));
 
             let c = self.xidlehook.main_async(&self.xcb).map(Selected::Exit);

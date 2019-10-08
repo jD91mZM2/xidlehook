@@ -1,11 +1,19 @@
 use std::convert::Infallible;
 
-use async_std::{io::{BufReader, BufWriter}, os::unix::net::UnixListener, prelude::*, task};
-use futures::{channel::{mpsc, oneshot}, sink::SinkExt};
+use async_std::{
+    io::{BufReader, BufWriter},
+    os::unix::net::UnixListener,
+    prelude::*,
+    task,
+};
+use futures::{
+    channel::{mpsc, oneshot},
+    sink::SinkExt,
+};
 use log::{trace, warn};
 
-pub mod models;
 pub mod handler;
+pub mod models;
 
 pub use self::models::*;
 

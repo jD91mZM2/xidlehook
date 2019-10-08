@@ -1,4 +1,8 @@
-use std::{io::{prelude::*, BufReader, LineWriter}, os::unix::net::UnixStream, time::Duration};
+use std::{
+    io::{prelude::*, BufReader, LineWriter},
+    os::unix::net::UnixStream,
+    time::Duration,
+};
 
 use structopt::{clap::arg_enum, StructOpt};
 
@@ -99,17 +103,15 @@ fn main() -> xidlehook::Result<()> {
             abortion,
             deactivation,
         }),
-        Subcommands::Control { timer, action } => {
-            socket::Message::Control(socket::Control {
-                timer: filter(timer),
-                action: match action {
-                    OptAction::Enable => socket::Action::Enable,
-                    OptAction::Disable => socket::Action::Disable,
-                    OptAction::Trigger => socket::Action::Trigger,
-                    OptAction::Delete => socket::Action::Delete,
-                },
-            })
-        },
+        Subcommands::Control { timer, action } => socket::Message::Control(socket::Control {
+            timer: filter(timer),
+            action: match action {
+                OptAction::Enable => socket::Action::Enable,
+                OptAction::Disable => socket::Action::Disable,
+                OptAction::Trigger => socket::Action::Trigger,
+                OptAction::Delete => socket::Action::Delete,
+            },
+        }),
         Subcommands::Query { timer } => socket::Message::Query(socket::Query {
             timer: filter(timer),
         }),

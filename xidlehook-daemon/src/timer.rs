@@ -1,6 +1,6 @@
 use std::{process::Command, time::Duration};
 
-use xidlehook::{timers::CmdTimer as Inner, Timer, Result};
+use xidlehook::{timers::CmdTimer as Inner, Result, Timer};
 
 pub struct CmdTimer {
     inner: Inner,
@@ -10,7 +10,12 @@ pub struct CmdTimer {
     deactivation: Option<Vec<String>>,
 }
 impl CmdTimer {
-    pub fn from_parts(time: Duration, activation: Vec<String>, abortion: Vec<String>, deactivation: Vec<String>) -> Self {
+    pub fn from_parts(
+        time: Duration,
+        activation: Vec<String>,
+        abortion: Vec<String>,
+        deactivation: Vec<String>,
+    ) -> Self {
         let mut me = Self {
             inner: Inner {
                 time,
@@ -24,15 +29,26 @@ impl CmdTimer {
         me
     }
 
-    pub fn from_shell(time: Duration, activation: String, abortion: String, deactivation: String) -> Self {
+    pub fn from_shell(
+        time: Duration,
+        activation: String,
+        abortion: String,
+        deactivation: String,
+    ) -> Self {
         let mut me = Self {
             inner: Inner {
                 time,
                 ..Default::default()
             },
-            activation: Some(activation).filter(|s| !s.is_empty()).map(|s| vec!["/bin/sh".into(), "-c".into(), s]),
-            abortion: Some(abortion).filter(|s| !s.is_empty()).map(|s| vec!["/bin/sh".into(), "-c".into(), s]),
-            deactivation: Some(deactivation).filter(|s| !s.is_empty()).map(|s| vec!["/bin/sh".into(), "-c".into(), s]),
+            activation: Some(activation)
+                .filter(|s| !s.is_empty())
+                .map(|s| vec!["/bin/sh".into(), "-c".into(), s]),
+            abortion: Some(abortion)
+                .filter(|s| !s.is_empty())
+                .map(|s| vec!["/bin/sh".into(), "-c".into(), s]),
+            deactivation: Some(deactivation)
+                .filter(|s| !s.is_empty())
+                .map(|s| vec!["/bin/sh".into(), "-c".into(), s]),
         };
         me.sync();
         me
@@ -57,15 +73,30 @@ impl CmdTimer {
 
     /// Propagate my fields to the inner timer
     fn sync(&mut self) {
-        self.inner.activation = self.activation.as_ref()
+        self.inner.activation = self
+            .activation
+            .as_ref()
             .map(|parts| (parts, Command::new(&parts[0])))
-            .map(|(parts, mut cmd)| { cmd.args(&parts[1..]); cmd });
-        self.inner.abortion = self.abortion.as_ref()
+            .map(|(parts, mut cmd)| {
+                cmd.args(&parts[1..]);
+                cmd
+            });
+        self.inner.abortion = self
+            .abortion
+            .as_ref()
             .map(|parts| (parts, Command::new(&parts[0])))
-            .map(|(parts, mut cmd)| { cmd.args(&parts[1..]); cmd });
-        self.inner.deactivation = self.deactivation.as_ref()
+            .map(|(parts, mut cmd)| {
+                cmd.args(&parts[1..]);
+                cmd
+            });
+        self.inner.deactivation = self
+            .deactivation
+            .as_ref()
             .map(|parts| (parts, Command::new(&parts[0])))
-            .map(|(parts, mut cmd)| { cmd.args(&parts[1..]); cmd });
+            .map(|(parts, mut cmd)| {
+                cmd.args(&parts[1..]);
+                cmd
+            });
     }
 }
 impl Timer for CmdTimer {

@@ -1,5 +1,5 @@
-use crate::{App, timer::CmdTimer};
 use super::models::*;
+use crate::{timer::CmdTimer, App};
 
 use xidlehook::Progress;
 
@@ -13,12 +13,10 @@ impl App {
                 if index > timers.len() {
                     return Ok(Some(Reply::Error(String::from("index > length"))));
                 }
-                timers.insert(index, CmdTimer::from_parts(
-                    add.time,
-                    add.activation,
-                    add.abortion,
-                    add.deactivation,
-                ));
+                timers.insert(
+                    index,
+                    CmdTimer::from_parts(add.time, add.activation, add.abortion, add.deactivation),
+                );
 
                 Ok(Some(Reply::Empty))
             },
@@ -38,7 +36,9 @@ impl App {
                         Action::Disable => timers[id].set_disabled(true),
                         Action::Enable => timers[id].set_disabled(false),
                         Action::Trigger => {
-                            if self.xidlehook.trigger(id, self.xcb.get_idle()?, true)? == Progress::Stop {
+                            if self.xidlehook.trigger(id, self.xcb.get_idle()?, true)?
+                                == Progress::Stop
+                            {
                                 return Ok(None);
                             }
                         },
@@ -46,7 +46,7 @@ impl App {
                             // Probably want to use `retain` to optimize this...
                             timers.remove(id);
                             removed += 1;
-                        }
+                        },
                     }
                 }
 
