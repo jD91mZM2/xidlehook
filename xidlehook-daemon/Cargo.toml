@@ -4,10 +4,13 @@ description = "xautolock rewrite in Rust, with a few extra features"
 edition = "2018"
 license = "MIT"
 name = "xidlehook-daemon"
-readme = "README.md"
-repository = "https://github.com/jD91mZM2/xidlehook"
 version = "0.8.0"
 default-run = "xidlehook"
+
+repository = "https://gitlab.com/jD91mZM2/xidlehook"
+readme = "README.md"
+keywords = ["xorg", "x", "timer"]
+categories = ["date-and-time", "command-line-utilities"]
 
 [dependencies]
 env_logger = "0.7.0"

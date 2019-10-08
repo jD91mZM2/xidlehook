@@ -1,6 +1,13 @@
+//! The timer trait and some useful implementations
+
 use crate::Result;
 use std::{process::Command, time::Duration};
 
+/// The timer trait is used to tell xidlehook after how much idle time
+/// your timer should activate (relatively), and what activation
+/// actually means. It also provides you with the ability to implement
+/// what happens when the next timer is activated, and also to disable
+/// the timer.
 pub trait Timer {
     /// Return the time left based on the relative idle time
     fn time_left(&mut self, idle_time: Duration) -> Result<Option<Duration>>;
@@ -34,12 +41,19 @@ pub trait Timer {
     }
 }
 
+/// A simple timer that runs a binary executable after a certain
+/// amount of time
 #[derive(Debug, Default)]
 pub struct CmdTimer {
+    /// The idle time required for this timer to activate
     pub time: Duration,
+    /// The command, if any, to run upon activation
     pub activation: Option<Command>,
+    /// The command, if any, to run upon abortion
     pub abortion: Option<Command>,
+    /// The command, if any, to run upon deactivation
     pub deactivation: Option<Command>,
+    /// Whether or not to disable this timer
     pub disabled: bool,
 }
 impl Timer for CmdTimer {
@@ -78,6 +92,7 @@ impl Timer for CmdTimer {
 
 /// A timer that lets you easily execute a rust callback on
 /// activation
+#[derive(Debug)]
 pub struct CallbackTimer<F>
 where
     F: FnMut(),

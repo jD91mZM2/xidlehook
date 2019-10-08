@@ -5,6 +5,12 @@ version = "0.1.0"
 authors = ["jD91mZM2 <me@krake.one>"]
 edition = "2018"
 
+repository = "https://gitlab.com/jD91mZM2/xidlehook"
+readme = "README.md"
+keywords = ["xorg", "x", "timer"]
+categories = ["date-and-time"]
+license = "MIT"
+
 [dependencies]
 log = "0.4.8"
 nix = "0.15.0"

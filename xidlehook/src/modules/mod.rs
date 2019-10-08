@@ -1,3 +1,6 @@
+//! The module trait and some useful implementations such as
+//! combinators
+
 use crate::{Error, Result, TimerInfo};
 
 use log::warn;
@@ -6,8 +9,11 @@ use log::warn;
 /// Should it be?
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Progress {
+    /// Continue the program, no action taken.
     Continue,
+    /// Abort this chain, don't pursue it any longer.
     Abort,
+    /// Stop the program completely. Use this sparingly.
     Stop,
 }
 

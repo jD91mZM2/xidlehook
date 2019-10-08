@@ -1,3 +1,24 @@
+#![warn(
+    // Harden built-in lints
+    missing_copy_implementations,
+    missing_debug_implementations,
+    missing_docs,
+    unreachable_pub,
+    variant_size_differences,
+
+    // Harden clippy lints
+    clippy::cargo_common_metadata,
+    clippy::clone_on_ref_ptr,
+    clippy::dbg_macro,
+    clippy::decimal_literal_representation,
+    clippy::float_cmp_const,
+    clippy::get_unwrap,
+    clippy::integer_arithmetic,
+    clippy::integer_division,
+    clippy::pedantic,
+    clippy::print_stdout,
+)]
+
 //! Instead of implementing your extension as something that
 //! communicates with xidlehook, what about implementing your
 //! extension as something that *is* xidlehook?
@@ -5,13 +26,16 @@
 //! This library lets you create your own xidlehook front-end using a
 //! powerful timer and module system.
 
-use std::{cmp, ptr, time::Duration};
+use std::{cmp, convert::TryInto, fmt, ptr, time::Duration};
 
 use log::trace;
 use nix::libc;
 
+/// The default error type for xidlehook. Unfortunately, it's a
+/// dynamic type for now.
 pub type Error = Box<dyn std::error::Error>;
-pub type Result<T> = std::result::Result<T, Error>;
+/// An alias to Result which overrides the default Error type.
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 pub mod modules;
 pub mod timers;
@@ -21,9 +45,13 @@ pub use self::{
     timers::Timer,
 };
 
+/// An identifier for a timer, based on the index in the timer list
+/// and its length.
 #[derive(Clone, Copy, Debug)]
 pub struct TimerInfo {
+    /// The index of this timer in the timer list
     pub index: usize,
+    /// The length of the timer list
     pub length: usize,
 }
 
@@ -75,6 +103,8 @@ macro_rules! with_module {
     };
 }
 
+// There are some false positive with Self and generics.
+#[allow(clippy::use_self)]
 impl<T, M> Xidlehook<T, M>
 where
     T: Timer,
@@ -175,7 +205,7 @@ where
         trace!("Activating timer {}", index);
 
         let timer_info = TimerInfo {
-            index: index,
+            index,
             length: self.timers.len(),
         };
 
@@ -365,8 +395,11 @@ where
             unsafe {
                 libc::nanosleep(
                     &libc::timespec {
-                        tv_sec: delay.as_secs() as libc::time_t,
-                        tv_nsec: delay.subsec_nanos() as libc::c_long,
+                        tv_sec: delay
+                            .as_secs()
+                            .try_into()
+                            .expect("woah that's one large number"),
+                        tv_nsec: delay.subsec_nanos().into(),
                     },
                     ptr::null_mut(),
                 );
@@ -394,5 +427,15 @@ where
             async_std::task::sleep(delay).await;
         }
         Ok(())
+    }
+}
+
+impl<T, M> fmt::Debug for Xidlehook<T, M>
+where
+    T: Timer,
+    M: Module + fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Modules: {:?}", self.module)
     }
 }

@@ -1,3 +1,8 @@
+//! Uses `PulseAudio`'s APIs to detect whenever audio is playing, and
+//! if so it refuses to let xidlehook run the next timer command. This
+//! is used to implement `--not-when-audio` in the xidlehook example
+//! application.
+
 use crate::{Module, Progress, Result, TimerInfo};
 
 use libpulse_binding::{
@@ -8,6 +13,7 @@ use libpulse_binding::{
 use log::debug;
 use std::{
     cell::RefCell,
+    fmt,
     rc::Rc,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -22,6 +28,7 @@ struct Counter {
     last_total: AtomicUsize,
 }
 
+/// See module-level docs
 pub struct NotWhenAudio {
     counter: Arc<Counter>,
     ctx: Rc<RefCell<Context>>,
@@ -101,6 +108,11 @@ impl NotWhenAudio {
         main.start().map_err(|err| format!("pulseaudio: {}", err))?;
 
         Ok(Self { counter, ctx, main })
+    }
+}
+impl fmt::Debug for NotWhenAudio {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "NotWhenAudio")
     }
 }
 impl Drop for NotWhenAudio {

@@ -9,7 +9,7 @@ impl App {
             Message::Add(add) => {
                 let timers = self.xidlehook.timers_mut()?;
 
-                let index = add.index.map(usize::from).unwrap_or(timers.len());
+                let index = add.index.map(usize::from).unwrap_or_else(|| timers.len());
                 if index > timers.len() {
                     return Ok(Some(Reply::Error(String::from("index > length"))));
                 }

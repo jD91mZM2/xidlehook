@@ -1,12 +1,19 @@
+//! Various X-related utilities. The `Xcb` object must be used
+//! regardless of whether or not you want to use `NotWhenAudio` - it's
+//! xidlehook's simple way to obtain the idle time. The
+//! `NotWhenFullscreen` module is used to implement
+//! `--not-when-fullscreen` in the example client.
+
 use crate::{Module, Progress, Result, TimerInfo};
 
-use std::{rc::Rc, slice, time::Duration};
+use std::{fmt, rc::Rc, slice, time::Duration};
 
 use log::debug;
 
 const NET_WM_STATE: &str = "_NET_WM_STATE";
 const NET_WM_STATE_FULLSCREEN: &str = "_NET_WM_STATE_FULLSCREEN";
 
+/// See the crate-level documentation
 pub struct Xcb {
     conn: xcb::Connection,
     root_window: xcb::Window,
@@ -14,6 +21,7 @@ pub struct Xcb {
     atom_net_wm_state_fullscreen: xcb::Atom,
 }
 impl Xcb {
+    /// Initialize all the things, like setting up an X connection.
     pub fn new() -> Result<Self> {
         let (conn, _) = xcb::Connection::connect(None)?;
 
@@ -36,10 +44,13 @@ impl Xcb {
             atom_net_wm_state_fullscreen,
         })
     }
+    /// Get the user's idle time using the `XScreenSaver` plugin
     pub fn get_idle(&self) -> Result<Duration> {
         let info = xcb::screensaver::query_info(&self.conn, self.root_window).get_reply()?;
-        Ok(Duration::from_millis(info.ms_since_user_input() as u64))
+        Ok(Duration::from_millis(info.ms_since_user_input().into()))
     }
+    /// Get whether or not the user's currently active window is
+    /// fullscreen
     pub fn get_fullscreen(&self) -> Result<bool> {
         let focused_window = xcb::xproto::get_input_focus(&self.conn)
             .get_reply()?
@@ -78,11 +89,19 @@ impl Xcb {
         Ok(false)
     }
 
+    /// Return a `NotWhenFullscreen` instance for a reference-counted
+    /// self
     pub fn not_when_fullscreen(self: Rc<Self>) -> NotWhenFullscreen {
         NotWhenFullscreen { xcb: self }
     }
 }
+impl fmt::Debug for Xcb {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Xcb")
+    }
+}
 
+/// See the module-level documentation
 pub struct NotWhenFullscreen {
     xcb: Rc<Xcb>,
 }
@@ -95,5 +114,10 @@ impl Module for NotWhenFullscreen {
                 Progress::Continue
             }
         })
+    }
+}
+impl fmt::Debug for NotWhenFullscreen {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "NotWhenFullscreen")
     }
 }
