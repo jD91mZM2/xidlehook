@@ -12,7 +12,7 @@ woot add \
       --deactivation "echo" "Timer:" "Deactivated" \;
 woot add \
       --time 10 \
-      --activation "sh" "-c" "hello" \;
+      --activation "sh" "-c" "echo hello" \;
 woot control --timer 1 2 --action disable
 woot query
 woot control --action enable

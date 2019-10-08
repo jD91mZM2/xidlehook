@@ -4,7 +4,7 @@ use log::warn;
 
 /// A decision each module has to take before a timer is executed:
 /// Should it be?
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Progress {
     Continue,
     Abort,

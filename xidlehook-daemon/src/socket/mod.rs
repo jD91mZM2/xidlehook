@@ -4,7 +4,8 @@ use async_std::{io::{BufReader, BufWriter}, os::unix::net::UnixListener, prelude
 use futures::{channel::{mpsc, oneshot}, sink::SinkExt};
 use log::{trace, warn};
 
-mod models;
+pub mod models;
+pub mod handler;
 
 pub use self::models::*;
 

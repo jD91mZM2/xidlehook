@@ -150,6 +150,72 @@ where
         Ok(())
     }
 
+    /// Skip ahead to the selected timer. Timers leading up to this
+    /// point will not be ran. If you pass `force`, modules will not
+    /// even be able to prevent this from happening (all requests
+    /// pre-timer would be ignored). Post-timer requests are fully
+    /// complied with.
+    ///
+    /// Whatever the return value is, it's already been handled. If
+    /// the return value is `Err(...)`, that means this function
+    /// invoked the module's `warning` function and that still wanted
+    /// to propagate the error. If the return value is
+    /// `Ok(Progress::Abort)`, never mind it. The `self.abort()`
+    /// function has already been invoked - it's all cool.
+    ///
+    /// # Panics
+    ///
+    /// - If the index is out of bounds
+    pub fn trigger(&mut self, index: usize, absolute_time: Duration, force: bool) -> Result<Progress> {
+        trace!("Activating timer {}", index);
+
+        let timer_info = TimerInfo {
+            index: index,
+            length: self.timers.len(),
+        };
+
+        let next = &mut self.timers[index];
+
+        match self.module.pre_timer(timer_info) {
+            Ok(_) if force => (),
+
+            Ok(Progress::Continue) => (),
+            Ok(Progress::Abort) => {
+                trace!("Module requested abort of chain.");
+                self.abort()?;
+                return Ok(Progress::Abort);
+            },
+            Ok(Progress::Stop) => return Ok(Progress::Stop),
+
+            Err(err) => {
+                self.module.warning(&err)?;
+            },
+        }
+
+        next.activate()?;
+        if let Some(previous) = self.previous() {
+            previous.deactivate()?;
+        }
+
+        self.base_idle_time = absolute_time;
+
+        match self.module.post_timer(timer_info) {
+            Ok(Progress::Continue) => (),
+            Ok(Progress::Abort) => {
+                trace!("Module requested abort of chain.");
+                self.abort()?;
+                return Ok(Progress::Abort);
+            },
+            Ok(Progress::Stop) => return Ok(Progress::Stop),
+
+            Err(err) => {
+                self.module.warning(&err)?;
+            },
+        }
+
+        Ok(Progress::Continue)
+    }
+
     /// Polls the scheduler for any activated timers. On success,
     /// returns the max amount of time a program can sleep for. Only
     /// fatal errors cause this function to return, and at that point,
@@ -184,56 +250,19 @@ where
         let relative_time = absolute_time - self.base_idle_time;
         trace!("Relative time: {:?}", relative_time);
 
-        let timer_info = TimerInfo {
-            index: self.next_index,
-            length: self.timers.len(),
-        };
-
         // When there's a next timer available, get the time until that activates
         if let Some(next) = self.timers.get_mut(self.next_index) {
             if let Some(remaining) = next.time_left(relative_time)? {
                 trace!("Taking next timer into account. Remaining: {:?}", remaining);
                 max_sleep = cmp::min(max_sleep, remaining);
             } else {
-                // Oh! It's already been activated.
-                trace!("Activating timer...");
+                // Oh! It's already been activated - let's trigger it.
 
-                match self.module.pre_timer(timer_info) {
-                    Ok(Progress::Continue) => (),
-                    Ok(Progress::Abort) => {
-                        trace!("Module requested abort of chain.");
-                        self.abort()?;
-                        return Ok(Some(max_sleep));
-                    },
-                    Ok(Progress::Stop) => {
-                        return Ok(None);
-                    },
-                    Err(err) => {
-                        self.module.warning(&err)?;
-                    },
+                match self.trigger(self.next_index, absolute_time, false)? {
+                    Progress::Continue => (),
+                    Progress::Abort => return Ok(Some(max_sleep)),
+                    Progress::Stop => return Ok(None),
                 }
-
-                next.activate()?;
-                if let Some(previous) = self.previous() {
-                    previous.deactivate()?;
-                }
-
-                match self.module.post_timer(timer_info) {
-                    Ok(Progress::Continue) => (),
-                    Ok(Progress::Abort) => {
-                        trace!("Module requested abort of chain.");
-                        self.abort()?;
-                        return Ok(Some(max_sleep));
-                    },
-                    Ok(Progress::Stop) => {
-                        return Ok(None);
-                    },
-                    Err(err) => {
-                        self.module.warning(&err)?;
-                    },
-                }
-
-                self.base_idle_time = absolute_time;
                 // From now on, `relative_time` is invalid. Don't use it.
 
                 loop {
@@ -241,6 +270,7 @@ where
 
                     if let Some(next) = self.timers.get_mut(self.next_index) {
                         if next.disabled() {
+                            trace!("Timer was disabled, going to next...");
                             continue;
                         }
                         if let Some(remaining) = next.time_left(Duration::default())? {
