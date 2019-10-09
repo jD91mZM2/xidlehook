@@ -4,7 +4,6 @@
     missing_debug_implementations,
     missing_docs,
     unreachable_pub,
-    variant_size_differences,
 
     // Harden clippy lints
     clippy::cargo_common_metadata,

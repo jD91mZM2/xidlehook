@@ -19,7 +19,7 @@ impl CmdTimer {
         let mut me = Self {
             inner: Inner {
                 time,
-                ..Default::default()
+                ..Inner::default()
             },
             activation: Some(activation).filter(|v| !v.is_empty()),
             abortion: Some(abortion).filter(|v| !v.is_empty()),
@@ -38,7 +38,7 @@ impl CmdTimer {
         let mut me = Self {
             inner: Inner {
                 time,
-                ..Default::default()
+                ..Inner::default()
             },
             activation: Some(activation)
                 .filter(|s| !s.is_empty())
@@ -62,13 +62,13 @@ impl CmdTimer {
     }
 
     pub fn activation(&self) -> &[String] {
-        self.activation.as_ref().map(|v| &**v).unwrap_or(&[])
+        self.activation.as_ref().map_or(&[], |v| &**v)
     }
     pub fn abortion(&self) -> &[String] {
-        self.abortion.as_ref().map(|v| &**v).unwrap_or(&[])
+        self.abortion.as_ref().map_or(&[], |v| &**v)
     }
     pub fn deactivation(&self) -> &[String] {
-        self.deactivation.as_ref().map(|v| &**v).unwrap_or(&[])
+        self.deactivation.as_ref().map_or(&[], |v| &**v)
     }
 
     /// Propagate my fields to the inner timer

@@ -1,3 +1,22 @@
+#![warn(
+    // Harden built-in lints
+    missing_copy_implementations,
+    missing_debug_implementations,
+
+    // Harden clippy lints
+    clippy::cargo_common_metadata,
+    clippy::clone_on_ref_ptr,
+    clippy::dbg_macro,
+    clippy::decimal_literal_representation,
+    clippy::float_cmp_const,
+    clippy::get_unwrap,
+    clippy::integer_arithmetic,
+    clippy::integer_division,
+    clippy::pedantic,
+)]
+// clippy is reacting on structopt macro
+#![allow(clippy::option_map_unwrap_or_else)]
+
 use std::{fs, rc::Rc, time::Duration};
 
 use async_std::{future::select, task};
@@ -16,9 +35,9 @@ use xidlehook::{
 
 mod signal_handler;
 mod socket;
-mod timer;
+mod timers;
 
-use self::timer::CmdTimer;
+use self::timers::CmdTimer;
 
 struct Defer<F: FnMut()>(F);
 impl<F: FnMut()> Drop for Defer<F> {
@@ -133,7 +152,7 @@ impl App {
             {
                 let address = address.clone();
                 task::spawn(async move {
-                    if let Err(err) = socket::socket_loop(&address, socket_tx).await {
+                    if let Err(err) = socket::main_loop(&address, socket_tx).await {
                         warn!("Socket handling errored: {}", err);
                     }
                 });
@@ -159,18 +178,14 @@ impl App {
                 Exit(xidlehook::Result<()>),
             }
 
-            let a = socket_rx
-                .as_mut()
-                .map(|rx| -> Box<dyn Future<Output = _> + Unpin> {
-                    Box::new(rx.next().map(Selected::Socket))
-                })
-                .unwrap_or_else(|| Box::new(future::pending()));
-            let b = signal_rx
-                .as_mut()
-                .map(|rx| -> Box<dyn Future<Output = _> + Unpin> {
-                    Box::new(rx.next().map(Selected::Signal))
-                })
-                .unwrap_or_else(|| Box::new(future::pending()));
+            let a = socket_rx.as_mut().map_or_else(
+                || -> Box<dyn Future<Output = _> + Unpin> { Box::new(future::pending()) },
+                |rx| Box::new(rx.next().map(Selected::Socket)),
+            );
+            let b = signal_rx.as_mut().map_or_else(
+                || -> Box<dyn Future<Output = _> + Unpin> { Box::new(future::pending()) },
+                |rx| Box::new(rx.next().map(Selected::Signal)),
+            );
 
             let c = self.xidlehook.main_async(&self.xcb).map(Selected::Exit);
             let res = task::block_on(select!(a, b, c));

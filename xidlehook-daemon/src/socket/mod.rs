@@ -17,7 +17,7 @@ pub mod models;
 
 pub use self::models::*;
 
-pub async fn socket_loop(
+pub async fn main_loop(
     address: &str,
     socket_tx: mpsc::Sender<(Message, oneshot::Sender<Reply>)>,
 ) -> xidlehook::Result<Infallible> {

@@ -1,5 +1,7 @@
 use super::models::*;
-use crate::{timer::CmdTimer, App};
+use crate::{timers::CmdTimer, App};
+
+use std::convert::TryInto;
 
 use xidlehook::Progress;
 
@@ -9,7 +11,7 @@ impl App {
             Message::Add(add) => {
                 let timers = self.xidlehook.timers_mut()?;
 
-                let index = add.index.map(usize::from).unwrap_or_else(|| timers.len());
+                let index = add.index.map_or_else(|| timers.len(), usize::from);
                 if index > timers.len() {
                     return Ok(Some(Reply::Error(String::from("index > length"))));
                 }
@@ -24,10 +26,18 @@ impl App {
                 let timers = self.xidlehook.timers();
 
                 let mut removed = 0;
-                for id in control.timer.iter(timers.len() as TimerId) {
+                for id in control.timer.iter(
+                    timers
+                        .len()
+                        .try_into()
+                        .expect("xidlehook does not yet handle this many timers"),
+                ) {
                     let timers = self.xidlehook.timers_mut()?;
 
-                    let id = usize::from(id - removed);
+                    let id = match id.checked_sub(removed) {
+                        Some(res) => usize::from(res),
+                        None => continue,
+                    };
                     if id >= timers.len() {
                         continue;
                     }
@@ -43,7 +53,8 @@ impl App {
                             }
                         },
                         Action::Delete => {
-                            // Probably want to use `retain` to optimize this...
+                            // TODO: Probably want to use `retain` to
+                            // optimize this...
                             timers.remove(id);
                             removed += 1;
                         },
@@ -56,7 +67,12 @@ impl App {
                 let timers = self.xidlehook.timers();
                 let mut output = Vec::new();
 
-                for id in query.timer.iter(timers.len() as TimerId) {
+                for id in query.timer.iter(
+                    timers
+                        .len()
+                        .try_into()
+                        .expect("xidlehook does not yet handle this many timers"),
+                ) {
                     let timer = match timers.get(usize::from(id)) {
                         Some(timer) => timer,
                         None => continue,
