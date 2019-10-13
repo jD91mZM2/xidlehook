@@ -1,0 +1,32 @@
+[package]
+authors = ["jD91mZM2 <me@krake.one>"]
+description = "xidlehook core library"
+edition = "2018"
+license = "MIT"
+name = "xidlehook-core"
+version = "0.1.0"
+
+repository = "https://gitlab.com/jD91mZM2/xidlehook"
+readme = "README.md"
+keywords = ["xorg", "x", "timer"]
+categories = ["date-and-time"]
+
+[dependencies]
+async-std = { version = "0.99.9", optional = true }
+log = "0.4.8"
+nix = "0.15.0"
+structopt = "0.3.2"
+xcb = { version = "0.8.2", features = ["x11", "screensaver"] }
+
+[dependencies.libpulse-binding]
+optional = true
+version = "2.6.0"
+default-features = false
+features = ["pa_v12_compatibility"]
+
+[dev-dependencies]
+env_logger = "0.7.0"
+
+[features]
+default = ["pulse"]
+pulse = ["libpulse-binding"]

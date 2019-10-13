@@ -1,0 +1,35 @@
+[package]
+authors = ["jD91mZM2 <me@krake.one>"]
+description = "xautolock rewrite in Rust, with a few extra features"
+edition = "2018"
+license = "MIT"
+name = "xidlehook"
+version = "0.8.0"
+default-run = "xidlehook"
+
+repository = "https://gitlab.com/jD91mZM2/xidlehook"
+readme = "../README.md"
+keywords = ["xorg", "x", "timer"]
+categories = ["date-and-time", "command-line-utilities"]
+
+[dependencies]
+async-std = "0.99.9"
+env_logger = "0.7.0"
+futures-preview = "=0.3.0-alpha.19"
+log = "0.4.8"
+nix = "0.15.0"
+serde = { version = "1.0.101", features = ["derive"] }
+serde_json = "1.0.41"
+structopt = "0.3.2"
+xcb = { version = "0.8.2", features = ["x11", "screensaver"] }
+xidlehook-core = { version = "0.1.0", features = ["async-std"] }
+
+[dependencies.libpulse-binding]
+optional = true
+version = "2.6.0"
+default-features = false
+features = ["pa_v12_compatibility"]
+
+[features]
+default = ["pulse"]
+pulse = ["libpulse-binding"]
