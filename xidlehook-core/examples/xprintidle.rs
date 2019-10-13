@@ -1,6 +1,6 @@
 //! Clone of `xprintidle` in rust
 
-use xidlehook::{modules::Xcb, Result};
+use xidlehook_core::{modules::Xcb, Result};
 
 fn main() -> Result<()> {
     let xcb = Xcb::new()?;

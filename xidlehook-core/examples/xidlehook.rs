@@ -14,7 +14,7 @@ use nix::{
     sys::{signal, wait},
 };
 use structopt::StructOpt;
-use xidlehook::{
+use xidlehook_core::{
     modules::{StopAt, Xcb},
     timers::CmdTimer,
     Module, Xidlehook,
@@ -60,7 +60,7 @@ pub struct Opt {
     pub timer: Vec<String>,
 }
 
-fn main() -> xidlehook::Result<()> {
+fn main() -> xidlehook_core::Result<()> {
     env_logger::init();
 
     let opt = Opt::from_args();
@@ -97,7 +97,7 @@ fn main() -> xidlehook::Result<()> {
     #[cfg(feature = "pulse")]
     {
         if opt.not_when_audio {
-            modules.push(Box::new(xidlehook::modules::NotWhenAudio::new()?))
+            modules.push(Box::new(xidlehook_core::modules::NotWhenAudio::new()?))
         }
     }
 

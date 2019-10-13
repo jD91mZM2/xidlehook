@@ -3,10 +3,10 @@ use crate::{timers::CmdTimer, App};
 
 use std::convert::TryInto;
 
-use xidlehook::Progress;
+use xidlehook_core::Progress;
 
 impl App {
-    pub fn handle_socket(&mut self, msg: Message) -> xidlehook::Result<Option<Reply>> {
+    pub fn handle_socket(&mut self, msg: Message) -> xidlehook_core::Result<Option<Reply>> {
         match msg {
             Message::Add(add) => {
                 let timers = self.xidlehook.timers_mut()?;

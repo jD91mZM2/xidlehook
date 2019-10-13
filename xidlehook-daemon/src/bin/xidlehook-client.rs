@@ -87,7 +87,7 @@ fn filter(filter: Vec<socket::TimerId>) -> socket::Filter {
     }
 }
 
-fn main() -> xidlehook::Result<()> {
+fn main() -> xidlehook_core::Result<()> {
     let opt = Opt::from_args();
     let packet = match opt.cmd {
         Subcommands::Add {

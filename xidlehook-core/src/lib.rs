@@ -346,7 +346,7 @@ where
     /// #     libc,
     /// #     sys::{signal, wait},
     /// # };
-    /// # use xidlehook::{
+    /// # use xidlehook_core::{
     /// #     modules::{StopAt, Xcb},
     /// #     timers::CallbackTimer,
     /// #     Xidlehook,
@@ -375,7 +375,7 @@ where
     ///     )?;
     /// }
     /// xidlehook.main_sync(&xcb, || EXITED.load(Ordering::SeqCst));
-    /// # Ok::<(), xidlehook::Error>(())
+    /// # Ok::<(), xidlehook_core::Error>(())
     /// ```
     pub fn main_sync<F>(mut self, xcb: &self::modules::Xcb, mut callback: F) -> Result<()>
     where

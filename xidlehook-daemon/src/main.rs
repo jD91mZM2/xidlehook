@@ -28,7 +28,7 @@ use futures::{
 use log::{trace, warn};
 use nix::{libc, sys::signal::Signal};
 use structopt::StructOpt;
-use xidlehook::{
+use xidlehook_core::{
     modules::{StopAt, Xcb},
     Module, Xidlehook,
 };
@@ -84,7 +84,7 @@ pub struct Opt {
     pub socket: Option<String>,
 }
 
-fn main() -> xidlehook::Result<()> {
+fn main() -> xidlehook_core::Result<()> {
     env_logger::init();
 
     let opt = Opt::from_args();
@@ -127,7 +127,7 @@ fn main() -> xidlehook::Result<()> {
     #[cfg(feature = "pulse")]
     {
         if opt.not_when_audio {
-            modules.push(Box::new(xidlehook::modules::NotWhenAudio::new()?))
+            modules.push(Box::new(xidlehook_core::modules::NotWhenAudio::new()?))
         }
     }
 
@@ -146,7 +146,7 @@ struct App {
     xidlehook: Xidlehook<CmdTimer, ((), Vec<Box<dyn Module>>)>,
 }
 impl App {
-    fn main_loop(&mut self) -> xidlehook::Result<()> {
+    fn main_loop(&mut self) -> xidlehook_core::Result<()> {
         let (socket_tx, socket_rx) = mpsc::channel(4);
         let _scope = if let Some(address) = self.opt.socket.clone() {
             {
@@ -175,7 +175,7 @@ impl App {
             enum Selected {
                 Socket(Option<(socket::Message, oneshot::Sender<socket::Reply>)>),
                 Signal(Option<Signal>),
-                Exit(xidlehook::Result<()>),
+                Exit(xidlehook_core::Result<()>),
             }
 
             let a = socket_rx.as_mut().map_or_else(

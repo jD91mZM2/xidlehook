@@ -1,6 +1,6 @@
 use std::{process::Command, time::Duration};
 
-use xidlehook::{timers::CmdTimer as Inner, Result, Timer};
+use xidlehook_core::{timers::CmdTimer as Inner, Result, Timer};
 
 pub struct CmdTimer {
     inner: Inner,

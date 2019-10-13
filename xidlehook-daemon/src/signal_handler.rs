@@ -23,7 +23,7 @@ pub extern "C" fn handler(sig: libc::c_int) {
 
 pub fn handle_signals(
     mut tx: mpsc::Sender<Signal>,
-) -> xidlehook::Result<JoinHandle<nix::Result<()>>> {
+) -> xidlehook_core::Result<JoinHandle<nix::Result<()>>> {
     // Signal handling with async-std *sucks* currently (at 0.99.8)
 
     unsafe {

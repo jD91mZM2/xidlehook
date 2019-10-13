@@ -1,4 +1,5 @@
 # xidlehook
+
 *Because xautolock is annoying to work with.*
 
 xidlehook is a general-purpose replacement for [xautolock](https://linux.die.net/man/1/xautolock).
@@ -54,12 +55,12 @@ xidlehook \
 Installation using `cargo`:
 
 ```sh
-cargo install xidlehook
+cargo install xidlehook --bins
 ```
 
-**Xidlehook with the default settings requires libXScrnSaver (or libxss) and
-libpulseaudio. On debian/ubuntu, don't forget to install the `-dev` versions,
-also.**
+**Xidlehook with the default settings requires libXScrnSaver (or
+libxss) and libpulseaudio. On debian/ubuntu, don't forget to install
+the `-dev` versions of all the mentioned dependencies, also.**
 
 It's also available on Nix and the [AUR (not officially maintained)](https://aur.archlinux.org/packages/xidlehook/).
 
@@ -72,11 +73,13 @@ cargo build --release
 ```
 
 ### Too bloaty?
+
 Not using pulseaudio?  
 Disable that requirement completely with `--no-default-features`!  
 This, however, will get rid of the `--not-when-audio` option.
 
 ## Socket API
+
 The socket API is very simple. Each command is a single byte, sent over a unix
 socket. Bind a file using `--socket /path/to/xidlehook.sock` (where the path is
 whatever you want), and then you can send one of the following bytes:

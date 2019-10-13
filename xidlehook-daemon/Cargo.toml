@@ -3,7 +3,7 @@ authors = ["jD91mZM2 <me@krake.one>"]
 description = "xautolock rewrite in Rust, with a few extra features"
 edition = "2018"
 license = "MIT"
-name = "xidlehook-daemon"
+name = "xidlehook"
 version = "0.8.0"
 default-run = "xidlehook"
 
@@ -21,7 +21,7 @@ serde = { version = "1.0.101", features = ["derive"] }
 serde_json = "1.0.41"
 structopt = "0.3.2"
 xcb = { version = "0.8.2", features = ["x11", "screensaver"] }
-xidlehook = { path = "../xidlehook/", features = ["async-std"] }
+xidlehook-core = { path = "../xidlehook-core/", features = ["async-std"] }
 
 # Requires async-std fork because of
 # https://github.com/async-rs/async-std/issues/248
@@ -39,8 +39,3 @@ features = ["pa_v12_compatibility"]
 [features]
 default = ["pulse"]
 pulse = ["libpulse-binding"]
-
-[[bin]]
-# Rename binary of "xidlehook-daemon" to just "xidlehook"
-name = "xidlehook"
-path = "src/main.rs"

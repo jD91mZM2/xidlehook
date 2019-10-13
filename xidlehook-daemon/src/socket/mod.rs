@@ -20,7 +20,7 @@ pub use self::models::*;
 pub async fn main_loop(
     address: &str,
     socket_tx: mpsc::Sender<(Message, oneshot::Sender<Reply>)>,
-) -> xidlehook::Result<Infallible> {
+) -> xidlehook_core::Result<Infallible> {
     let listener = UnixListener::bind(address).await?;
     trace!("Bound unix listener on address {:?}", address);
 
