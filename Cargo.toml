@@ -1,2 +1,5 @@
 [workspace]
 members = ["xidlehook-*"]
+
+[patch.crates-io]
+xidlehook-core = { path = "xidlehook-core" }

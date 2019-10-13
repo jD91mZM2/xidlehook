@@ -8,11 +8,12 @@ version = "0.8.0"
 default-run = "xidlehook"
 
 repository = "https://gitlab.com/jD91mZM2/xidlehook"
-readme = "README.md"
+readme = "../README.md"
 keywords = ["xorg", "x", "timer"]
 categories = ["date-and-time", "command-line-utilities"]
 
 [dependencies]
+async-std = "0.99.9"
 env_logger = "0.7.0"
 futures-preview = "=0.3.0-alpha.19"
 log = "0.4.8"
@@ -21,14 +22,7 @@ serde = { version = "1.0.101", features = ["derive"] }
 serde_json = "1.0.41"
 structopt = "0.3.2"
 xcb = { version = "0.8.2", features = ["x11", "screensaver"] }
-xidlehook-core = { path = "../xidlehook-core/", features = ["async-std"] }
-
-# Requires async-std fork because of
-# https://github.com/async-rs/async-std/issues/248
-[dependencies.async-std]
-git = "https://github.com/mvucenovic/async-std"
-rev = "a057733606f7b32f06d57ad0e945e422cb7030c5"
-features = [ "unstable" ]
+xidlehook-core = { version = "0.1.0", features = ["async-std"] }
 
 [dependencies.libpulse-binding]
 optional = true

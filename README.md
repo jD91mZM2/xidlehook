@@ -80,19 +80,13 @@ This, however, will get rid of the `--not-when-audio` option.
 
 ## Socket API
 
-The socket API is very simple. Each command is a single byte, sent over a unix
-socket. Bind a file using `--socket /path/to/xidlehook.sock` (where the path is
-whatever you want), and then you can send one of the following bytes:
-
-| Byte | Command                           |
-| ---  | ---                               |
-| 0    | Deactivate                        |
-| 1    | Activate                          |
-| 2    | Run the timer command immediately |
+The socket API can be communicated with over JSON. The full data and
+types for these structures can be seen in all the struct definitions
+of `xidlehook-daemon/src/socket/models.rs`.
 
 For convenience, there is now an xidlehook-client (see
-[#18](https://github.com/jD91mZM2/xidlehook/pull/18)), which will communicate
-with this API for you. See
+[#18](https://github.com/jD91mZM2/xidlehook/pull/18)), which will
+communicate with this API for you. See
 ```
 xidlehook-client --help
 ```
@@ -101,14 +95,8 @@ for details.
 A common use case of `xidlehook` is using it to run a lockscreen. To then
 manually lock the screen, you could bind this bash command to a shortcut:
 ```
-xidlehook-client --trigger --socket /path/to/xidlehook.sock
+xidlehook-client --action trigger --socket /path/to/xidlehook.sock
 ```
-
-Alternatively, you can use the API directly using, for example, `socat`:
-```
-echo -ne "\x0" | socat - UNIX-CONNECT:/path/to/xidlehook.sock
-```
-(You have no reason to run this for the most cases anymore)
 
 ## Caffeinate
 
