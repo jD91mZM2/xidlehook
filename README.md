@@ -95,7 +95,11 @@ for details.
 A common use case of `xidlehook` is using it to run a lockscreen. To then
 manually lock the screen, you could bind this bash command to a shortcut:
 ```
-xidlehook-client --action trigger --socket /path/to/xidlehook.sock
+# Check what timer(s) you want to trigger...
+xidlehook-client --socket /path/to/xidlehook.sock query
+
+# Trigger it/them
+xidlehook-client --socket /path/to/xidlehook.sock control --action trigger --timer <my timer id>
 ```
 
 ## Caffeinate
