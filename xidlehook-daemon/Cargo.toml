@@ -22,14 +22,8 @@ serde = { version = "1.0.101", features = ["derive"] }
 serde_json = "1.0.41"
 structopt = "0.3.2"
 xcb = { version = "0.8.2", features = ["x11", "screensaver"] }
-xidlehook-core = { version = "0.1.0", features = ["async-std"] }
-
-[dependencies.libpulse-binding]
-optional = true
-version = "2.6.0"
-default-features = false
-features = ["pa_v12_compatibility"]
+xidlehook-core = { version = "0.1.0", default-features = false, features = ["async-std"] }
 
 [features]
 default = ["pulse"]
-pulse = ["libpulse-binding"]
+pulse = ["xidlehook-core/pulse"]
