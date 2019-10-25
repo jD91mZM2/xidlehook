@@ -110,7 +110,7 @@ Or if you want to clone it manually:
 #+BEGIN_SRC sh
 git clone https://gitlab.com/jD91mZM2/xidlehook
 cd xidlehook
-cargo build --release --bins
+cargo +beta build --release --bins
 #+END_SRC
 
 ** Socket API
