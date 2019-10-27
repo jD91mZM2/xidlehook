@@ -12,25 +12,21 @@ use libpulse_binding::{
 };
 use log::debug;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     fmt,
     rc::Rc,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
 };
 
 const PA_NAME: &str = "xidlehook";
 
 struct Counter {
-    in_progress: AtomicUsize,
-    last_total: AtomicUsize,
+    in_progress: Cell<usize>,
+    last_total: Cell<usize>,
 }
 
 /// See module-level docs
 pub struct NotWhenAudio {
-    counter: Arc<Counter>,
+    counter: Rc<Counter>,
     ctx: Rc<RefCell<Context>>,
     main: Mainloop,
 }
@@ -39,20 +35,48 @@ impl NotWhenAudio {
     pub fn new() -> Result<Self> {
         let mut main = Mainloop::new().ok_or("pulseaudio: failed to create main loop")?;
 
-        // Should probably be thread-safe, see https://github.com/jnqnfe/pulse-binding-rust/issues/27
-        // ... but it can't be thread-safe, see https://github.com/jnqnfe/pulse-binding-rust/issues/19
+        // These variables don't need to use thread-safe reference
+        // counters due to the fact that we're using `main.lock()`
+        // which will prevent processing of events.
         let ctx = Rc::new(RefCell::new(
             Context::new(&main, PA_NAME).ok_or("pulseaudio: failed to create context")?,
         ));
 
-        let counter = Arc::new(Counter {
-            in_progress: AtomicUsize::new(0),
-            last_total: AtomicUsize::new(0),
+        let counter = Rc::new(Counter {
+            in_progress: Cell::new(0),
+            last_total: Cell::new(0),
         });
 
         {
-            let counter = Arc::clone(&counter);
+            let counter = Rc::clone(&counter);
             let ctx = Rc::clone(&ctx);
+
+            let subscribe_callback = {
+                let ctx = Rc::clone(&ctx);
+                let counter = Rc::clone(&counter);
+
+                move |_, _, _| {
+                    let counter = Rc::clone(&counter);
+                    ctx.borrow_mut()
+                        .introspect()
+                        .get_sink_input_info_list(move |res| match res {
+                            ListResult::Item(item) => {
+                                if !item.corked {
+                                    let count = counter.in_progress.get() + 1;
+                                    counter.in_progress.set(count);
+                                    debug!("Partial count: {}", count);
+                                }
+                            },
+                            ListResult::End | ListResult::Error => {
+                                let count = counter.in_progress.replace(0);
+                                counter.last_total.set(count);
+                                debug!("Total sum: {}", count);
+                            },
+                        });
+                }
+            };
+
+            ctx.borrow_mut().set_subscribe_callback(Some(Box::new(subscribe_callback.clone())));
 
             Rc::clone(&ctx)
                 .borrow_mut()
@@ -61,35 +85,9 @@ impl NotWhenAudio {
                         return;
                     }
 
-                    let subscribe_callback = {
-                        let ctx = Rc::clone(&ctx);
-                        let counter = Arc::clone(&counter);
-
-                        move |_, _, _| {
-                            let counter = Arc::clone(&counter);
-                            ctx.borrow_mut()
-                                .introspect()
-                                .get_sink_input_info_list(move |res| match res {
-                                    ListResult::Item(item) => {
-                                        if !item.corked {
-                                            let count =
-                                                counter.in_progress.fetch_add(1, Ordering::SeqCst);
-                                            debug!("Partial count: {}", count);
-                                        }
-                                    },
-                                    ListResult::End | ListResult::Error => {
-                                        let count = counter.in_progress.swap(0, Ordering::SeqCst);
-                                        counter.last_total.store(count, Ordering::SeqCst);
-                                        debug!("Total sum: {}", count);
-                                    },
-                                });
-                        }
-                    };
-
                     // Subscribe to sink input events
                     {
                         let mut ctx = ctx.borrow_mut();
-                        ctx.set_subscribe_callback(Some(Box::new(subscribe_callback.clone())));
                         ctx.subscribe(Facility::SinkInput.to_interest_mask(), |_| ());
                     }
 
@@ -105,7 +103,10 @@ impl NotWhenAudio {
         unsafe { &mut *ctx.as_ptr() }
             .connect(None, 0, None)
             .map_err(|err| format!("pulseaudio: {}", err))?;
+
+        main.lock();
         main.start().map_err(|err| format!("pulseaudio: {}", err))?;
+        main.unlock();
 
         Ok(Self { counter, ctx, main })
     }
@@ -124,7 +125,7 @@ impl Drop for NotWhenAudio {
 }
 impl Module for NotWhenAudio {
     fn pre_timer(&mut self, _timer: TimerInfo) -> Result<Progress> {
-        let players = self.counter.last_total.load(Ordering::SeqCst);
+        let players = self.counter.last_total.get();
         if players == 0 {
             Ok(Progress::Continue)
         } else {
