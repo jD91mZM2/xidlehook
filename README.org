@@ -55,11 +55,8 @@ xidlehook \
 to mostly use normal syntax./
 
 ** Installation
-/As of currently, you will need to use the Rust 1.39.0 beta or higher
-when building the xidlehook application (not the library). This is
-because xidlehook is experimenting with the brand new async/await
-syntax. The core library is NOT similarly limited as it has
-=async-std= behind a feature gate./
+/As of currently, you will need to use the Rust 1.39.0 higher when
+building xidlehook./
 
 Recommended installation is through the [[https://nixos.org/nix/][Nix package manager]], which
 will get you a sane default configuration of xidlehook as well as all
@@ -73,8 +70,8 @@ will install xidlehook regardless of whether you have rust installed,
 regardless of whether you have libxcb and friends installed, whatever.
 Nix just works.
 
-Due to the current beta situation explained above, the version in
-nixpkgs is outdated. You can install it anyway, still using Nix
+If you instead would like to use the latest master, you can install it
+using the following.
 
 #+BEGIN_SRC sh
 nix-env -if https://gitlab.com/jD91mZM2/xidlehook/-/archive/master.tar.gz
@@ -102,7 +99,7 @@ cargo, the official rust package manager that works almost everywhere
 with rust installed.
 
 #+BEGIN_SRC sh
-cargo +beta install xidlehook --bins
+cargo install xidlehook --bins
 #+END_SRC
 
 Or if you want to clone it manually:
@@ -110,7 +107,7 @@ Or if you want to clone it manually:
 #+BEGIN_SRC sh
 git clone https://gitlab.com/jD91mZM2/xidlehook
 cd xidlehook
-cargo +beta build --release --bins
+cargo build --release --bins
 #+END_SRC
 
 ** Socket API
