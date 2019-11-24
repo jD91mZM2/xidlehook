@@ -69,6 +69,7 @@ impl NotWhenAudio {
             .map_err(|err| format!("pulseaudio: failed to connect context: {}", err))?;
 
         mainloop.borrow_mut().lock();
+
         if let Err(err) = mainloop.borrow_mut().start() {
             mainloop.borrow_mut().unlock();
             return Err(Error::from(format!("pulseaudio: failed to start mainloop: {}", err)))?;
@@ -159,7 +160,9 @@ impl Drop for NotWhenAudio {
 }
 impl Module for NotWhenAudio {
     fn pre_timer(&mut self, _timer: TimerInfo) -> Result<Progress> {
+        self.mainloop.borrow_mut().lock();
         let players = self.counter.last_total.get();
+        self.mainloop.borrow_mut().unlock();
         if players == 0 {
             Ok(Progress::Continue)
         } else {

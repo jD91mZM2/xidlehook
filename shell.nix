@@ -5,5 +5,5 @@ pkgs.mkShell {
   nativeBuildInputs = with pkgs; [ pkgconfig ];
 
   # Libraries to be installed
-  buildInputs = with pkgs; [ openssl xorg.libxcb xorg.libXScrnSaver ];
+  buildInputs = with pkgs; [ openssl xorg.libX11 xorg.libxcb xorg.libXScrnSaver ];
 }
