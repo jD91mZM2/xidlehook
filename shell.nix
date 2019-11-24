@@ -1,9 +1,7 @@
 { pkgs ? import <nixpkgs> {} }:
 
 pkgs.mkShell {
-  # Things to be put in $PATH
-  nativeBuildInputs = with pkgs; [ pkgconfig ];
-
-  # Libraries to be installed
-  buildInputs = with pkgs; [ openssl xorg.libX11 xorg.libxcb xorg.libXScrnSaver ];
+  buildInputs = with pkgs; [ xorg.libxcb xorg.libX11 xorg.libXScrnSaver libpulseaudio ];
+  nativeBuildInputs = with pkgs; [ pkg-config ];
+  LD_LIBRARY_PATH = "${pkgs.libpulseaudio}/lib";
 }
