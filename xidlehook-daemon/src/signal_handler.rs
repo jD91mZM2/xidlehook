@@ -4,8 +4,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use async_std::task;
-use futures::{channel::mpsc, prelude::*};
+use async_std::{task, sync};
 use nix::{
     libc,
     sys::{
@@ -22,7 +21,7 @@ pub extern "C" fn handler(sig: libc::c_int) {
 }
 
 pub fn handle_signals(
-    mut tx: mpsc::Sender<Signal>,
+    tx: sync::Sender<Signal>,
 ) -> xidlehook_core::Result<JoinHandle<nix::Result<()>>> {
     // Signal handling with async-std *sucks* currently (at 0.99.8)
 
@@ -55,7 +54,7 @@ pub fn handle_signals(
                     let _ = wait::waitpid(None, Some(wait::WaitPidFlag::WNOHANG));
                 },
                 Signal::SIGINT => {
-                    task::block_on(tx.send(signal)).unwrap();
+                    task::block_on(tx.send(signal));
                     break;
                 },
                 _ => (),

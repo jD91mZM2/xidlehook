@@ -68,6 +68,7 @@ pub enum Message {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct QueryResult {
     pub timer: TimerId,
+    pub time: Duration,
     pub activation: Vec<String>,
     pub abortion: Vec<String>,
     pub deactivation: Vec<String>,

@@ -5,10 +5,7 @@ use async_std::{
     os::unix::net::UnixListener,
     prelude::*,
     task,
-};
-use futures::{
-    channel::{mpsc, oneshot},
-    sink::SinkExt,
+    sync,
 };
 use log::{trace, warn};
 
@@ -19,7 +16,7 @@ pub use self::models::*;
 
 pub async fn main_loop(
     address: &str,
-    socket_tx: mpsc::Sender<(Message, oneshot::Sender<Reply>)>,
+    socket_tx: sync::Sender<(Message, sync::Sender<Reply>)>,
 ) -> xidlehook_core::Result<Infallible> {
     let listener = UnixListener::bind(address).await?;
     trace!("Bound unix listener on address {:?}", address);
@@ -28,7 +25,7 @@ pub async fn main_loop(
         let (stream, addr) = listener.accept().await?;
         trace!("Connection from {:?}", addr);
 
-        let mut socket_tx = socket_tx.clone();
+        let socket_tx = socket_tx.clone();
         task::spawn(async move {
             let reader = BufReader::new(&stream);
             let mut writer = BufWriter::new(&stream);
@@ -46,10 +43,10 @@ pub async fn main_loop(
                     },
                 };
 
-                let (reply_tx, reply_rx) = oneshot::channel();
-                socket_tx.send((msg, reply_tx)).await.unwrap();
+                let (reply_tx, reply_rx) = sync::channel(1);
+                socket_tx.send((msg, reply_tx)).await;
 
-                let reply = reply_rx.await.unwrap();
+                let reply = reply_rx.recv().await;
 
                 let res = async {
                     let msg = serde_json::to_vec(&reply)?;

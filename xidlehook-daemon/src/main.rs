@@ -19,11 +19,11 @@
 
 use std::{fs, rc::Rc, time::Duration};
 
-use async_std::{future::select, task};
-use futures::{
-    channel::{mpsc, oneshot},
-    future,
+use async_std::{
     prelude::*,
+    future,
+    sync,
+    task,
 };
 use log::{trace, warn};
 use nix::{libc, sys::signal::Signal};
@@ -147,7 +147,7 @@ struct App {
 }
 impl App {
     fn main_loop(&mut self) -> xidlehook_core::Result<()> {
-        let (socket_tx, socket_rx) = mpsc::channel(4);
+        let (socket_tx, socket_rx) = sync::channel(4);
         let _scope = if let Some(address) = self.opt.socket.clone() {
             {
                 let address = address.clone();
@@ -165,7 +165,7 @@ impl App {
             None
         };
 
-        let (signal_tx, signal_rx) = mpsc::channel(1);
+        let (signal_tx, signal_rx) = sync::channel(1);
         let signal_thread = signal_handler::handle_signals(signal_tx)?;
 
         let mut socket_rx = Some(socket_rx);
@@ -173,22 +173,31 @@ impl App {
 
         loop {
             enum Selected {
-                Socket(Option<(socket::Message, oneshot::Sender<socket::Reply>)>),
+                Socket(Option<(socket::Message, sync::Sender<socket::Reply>)>),
                 Signal(Option<Signal>),
                 Exit(xidlehook_core::Result<()>),
             }
 
-            let a = socket_rx.as_mut().map_or_else(
-                || -> Box<dyn Future<Output = _> + Unpin> { Box::new(future::pending()) },
-                |rx| Box::new(rx.next().map(Selected::Socket)),
-            );
-            let b = signal_rx.as_mut().map_or_else(
-                || -> Box<dyn Future<Output = _> + Unpin> { Box::new(future::pending()) },
-                |rx| Box::new(rx.next().map(Selected::Signal)),
-            );
+            let a = async {
+                if let Some(ref rx) = socket_rx {
+                    Selected::Socket(rx.recv().await)
+                } else {
+                    future::pending().await
+                }
+            };
+            let b = async {
+                if let Some(ref rx) = signal_rx {
+                    Selected::Signal(rx.recv().await)
+                } else {
+                    future::pending().await
+                }
+            };
 
-            let c = self.xidlehook.main_async(&self.xcb).map(Selected::Exit);
-            let res = task::block_on(select!(a, b, c));
+            let c = async {
+                let status = self.xidlehook.main_async(&self.xcb).await;
+                Selected::Exit(status)
+            };
+            let res = task::block_on(a.race(b).race(c));
 
             match res {
                 Selected::Socket(data) => {
@@ -198,7 +207,7 @@ impl App {
                             Some(response) => response,
                             None => break,
                         };
-                        reply.send(response).unwrap();
+                        task::block_on(reply.send(response));
                     } else {
                         socket_rx = None;
                     }
@@ -207,15 +216,15 @@ impl App {
                     if let Some(sig) = sig {
                         trace!("Signal received: {}", sig);
                         break;
-                    } else {
-                        signal_rx = None;
-                    }
-                },
-                Selected::Exit(res) => {
-                    res?;
-                    break;
-                },
-            }
+                        } else {
+                            signal_rx = None;
+                        }
+                    },
+                    Selected::Exit(res) => {
+                        res?;
+                        break;
+                    },
+                }
         }
 
         // Call signal handler to pretend there's a signal - which will

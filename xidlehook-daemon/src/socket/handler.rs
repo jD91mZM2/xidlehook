@@ -79,6 +79,7 @@ impl App {
                     };
                     output.push(QueryResult {
                         timer: id,
+                        time: timer.get_time(),
                         activation: timer.activation().to_vec(),
                         abortion: timer.abortion().to_vec(),
                         deactivation: timer.deactivation().to_vec(),

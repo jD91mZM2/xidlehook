@@ -16,6 +16,7 @@ echo "Looks good? Press enter to continue."
 read -r
 
 echo "Running tests..."
+cargo check
 cargo test
 
 echo "Making sure packaging works..."
@@ -29,7 +30,8 @@ git status
 echo "Publishing version $version!!! Press enter to continue."
 read -r
 
-git tag "$version"
+git tag "$version" --annotate --sign -m "xidlehook $version"
 
-cargo publish --manifest-path xidlehook-core/Cargo.toml
-cargo publish --manifest-path xidlehook-daemon/Cargo.toml
+cargo publish --manifest-path xidlehook-core/Cargo.toml &
+cargo publish --manifest-path xidlehook-daemon/Cargo.toml &
+wait

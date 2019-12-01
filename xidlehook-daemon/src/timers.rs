@@ -61,6 +61,13 @@ impl CmdTimer {
         self.inner.disabled
     }
 
+    // There's no reason to not have `set_time` here as well, it just
+    // isn't available in the API yet.
+
+    pub fn get_time(&self) -> Duration {
+        self.inner.time
+    }
+
     pub fn activation(&self) -> &[String] {
         self.activation.as_ref().map_or(&[], |v| &**v)
     }
