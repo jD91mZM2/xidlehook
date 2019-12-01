@@ -690,7 +690,7 @@ dependencies = [
 
 [[package]]
 name = "xidlehook"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "async-std 0.99.9 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",

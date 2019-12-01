@@ -4,7 +4,7 @@ description = "xautolock rewrite in Rust, with a few extra features"
 edition = "2018"
 license = "MIT"
 name = "xidlehook"
-version = "0.8.0"
+version = "0.8.1"
 default-run = "xidlehook"
 
 repository = "https://gitlab.com/jD91mZM2/xidlehook"
