@@ -337,6 +337,10 @@ where
 
     /// Runs a standard poll-sleep-repeat loop.
     /// ```rust
+    /// # if std::env::var("DISPLAY").is_err() {
+    /// #     // Don't fail on CI.
+    /// #     return Ok::<(), xidlehook_core::Error>(());
+    /// # }
     /// # use std::{
     /// #     sync::atomic::{AtomicBool, Ordering},
     /// #     time::Duration,

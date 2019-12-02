@@ -1,0 +1,30 @@
+stages:
+  - check
+  - deploy
+
+check:
+  stage: check
+  image: rust
+  cache:
+    paths:
+      - target
+  before_script:
+    - apt-get update -y
+    - apt-get install -y libpulse-dev libpulse0 libxcb-screensaver0
+      libxcb-screensaver0-dev libxcb1 libxcb1-dev libxss-dev libxss1
+  script:
+    - cargo build
+    - cargo test
+
+cache-nix-build:
+  stage: deploy
+  image: nixos/nix
+  only:
+    - master
+    - gitlab-ci
+  before_script:
+    - nix-channel --list
+    - nix-env -iA nixpkgs.git
+    - nix-env -iA cachix -f https://cachix.org/api/v1/install
+  script:
+    - nix-build | cachix push jd91mzm2
