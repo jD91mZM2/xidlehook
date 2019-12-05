@@ -11,9 +11,8 @@ let
   };
   pkgs = pkgsFn { overlays = [ mozOverlay crateOverlay ]; };
   buildRustCrate = pkgs.buildRustCrate.override {
-    rustc = pkgs.latest.rustChannels.beta.rust;
+    rustc = pkgs.latest.rustChannels.stable.rust;
   };
-in
-  (pkgs.callPackage ./Cargo.nix { inherit buildRustCrate; }).workspaceMembers.xidlehook.build.override {
-    features = [];
-  }
+in (pkgs.callPackage ./Cargo.nix { inherit buildRustCrate; }).workspaceMembers.xidlehook.build.override {
+  features = [];
+}
