@@ -13,6 +13,13 @@ let
   buildRustCrate = pkgs.buildRustCrate.override {
     rustc = pkgs.latest.rustChannels.stable.rust;
   };
-in (pkgs.callPackage ./Cargo.nix { inherit buildRustCrate; }).workspaceMembers.xidlehook.build.override {
-  features = [];
-}
+
+  rootCrate = (pkgs.callPackage ./Cargo.nix { inherit buildRustCrate; }).workspaceMembers.xidlehook.build.override {
+    features = [];
+  };
+in rootCrate.overrideAttrs (_attrs: {
+  postInstall = ''
+    # Remove pointless file which can cause collisions
+    rm $out/lib/link
+  '';
+})
