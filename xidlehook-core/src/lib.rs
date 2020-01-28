@@ -114,13 +114,11 @@ where
         with_module!(self, other)
     }
 
-    /// Return this xidlehook instance but with an additional module
-    /// activated. This works using the timer impl for `(A, B)` to get
-    /// a fixed-size list of modules at compile time.
+    /// Return this xidlehook instance but with an additional module activated. This works using the
+    /// timer impl for `(A, B)` to get a fixed-size list of modules at compile time.
     pub fn register<N: Module>(self, other: N) -> Xidlehook<T, (M, N)> {
-        // Sadly cannot use `self.with_module` safely due to use of
-        // `self.module` - Rust isn't intelligent enough to realize
-        // the function isn't using that field. This is one of the few
+        // Sadly cannot use `self.with_module` safely due to use of `self.module` - Rust isn't
+        // intelligent enough to realize the function isn't using that field. This is one of the few
         // shortcomings of Rust IMO.
         with_module!(self, (self.module, other))
     }
@@ -130,16 +128,14 @@ where
         &self.timers
     }
 
-    /// Returns a mutable list of all timers. Use this to add or
-    /// remove timers as you wish. This will abort the idle chain as
-    /// that may otherwise panic.
+    /// Returns a mutable list of all timers. Use this to add or remove timers as you wish. This
+    /// will abort the idle chain as that may otherwise panic.
     pub fn timers_mut(&mut self) -> Result<&mut Vec<T>> {
         self.abort()?;
         Ok(&mut self.timers)
     }
 
-    /// Returns the previous timer that was activated (but not
-    /// deactivated)
+    /// Returns the previous timer that was activated (but not deactivated)
     fn previous(&mut self) -> Option<&mut T> {
         self.next_index
             .checked_sub(1)
@@ -159,9 +155,8 @@ where
         Ok(())
     }
 
-    /// Calls the abortion functions on the current timer and restarts
-    /// from index zero. Just like `poll` is continued usage after an
-    /// error discouraged.
+    /// Calls the abortion functions on the current timer and restarts from index zero. Just like
+    /// `poll` is continued usage after an error discouraged.
     fn reset(&mut self) -> Result<()> {
         self.abort()?;
 
@@ -179,18 +174,24 @@ where
         Ok(())
     }
 
-    /// Skip ahead to the selected timer. Timers leading up to this
-    /// point will not be ran. If you pass `force`, modules will not
-    /// even be able to prevent this from happening (all requests
-    /// pre-timer would be ignored). Post-timer requests are fully
-    /// complied with.
+    fn next_enabled(&'_ mut self, mut index: usize) -> Option<usize> {
+        while self.timers.get_mut(index)?.disabled() {
+            trace!("Timer {} was disabled, going to next...", index);
+            // Thanks, clippy, but get_mut will fail far before this is even close to overflowing
+            #[allow(clippy::integer_arithmetic)]
+            { index += 1; }
+        }
+        Some(index)
+    }
+
+    /// Skip ahead to the selected timer. Timers leading up to this point will not be ran. If you
+    /// pass `force`, modules will not even be able to prevent this from happening (all requests
+    /// pre-timer would be ignored). Post-timer requests are fully complied with.
     ///
-    /// Whatever the return value is, it's already been handled. If
-    /// the return value is `Err(...)`, that means this function
-    /// invoked the module's `warning` function and that still wanted
-    /// to propagate the error. If the return value is
-    /// `Ok(Progress::Abort)`, never mind it. The `self.abort()`
-    /// function has already been invoked - it's all cool.
+    /// Whatever the return value is, it's already been handled. If the return value is `Err(...)`,
+    /// that means this function invoked the module's `warning` function and that still wanted to
+    /// propagate the error. If the return value is `Ok(Progress::Abort)`, never mind it. The
+    /// `self.abort()` function has already been invoked - it's all cool.
     ///
     /// # Panics
     ///
@@ -250,25 +251,24 @@ where
         Ok(Progress::Continue)
     }
 
-    /// Polls the scheduler for any activated timers. On success,
-    /// returns the max amount of time a program can sleep for. Only
-    /// fatal errors cause this function to return, and at that point,
+    /// Polls the scheduler for any activated timers. On success, returns the max amount of time a
+    /// program can sleep for. Only fatal errors cause this function to return, and at that point,
     /// the state of xidlehook is undefined so it should not be used.
     ///
     /// # Panics
     ///
-    /// Panics when there are no timers added - there must always be
-    /// at least one.
+    /// Panics when there are no *enabled* timers added - there must always be at least one.
     pub fn poll(&mut self, absolute_time: Duration) -> Result<Option<Duration>> {
         if absolute_time < self.previous_idle_time {
-            // If the idle time has decreased, the only reasonable
-            // explanation is that the user briefly wasn't idle.
+            // If the idle time has decreased, the only reasonable explanation is that the user
+            // briefly wasn't idle.
             self.reset()?;
         }
 
         self.previous_idle_time = absolute_time;
 
-        let mut max_sleep = self.timers[0]
+        let first_index = self.next_enabled(0).expect("there must always be at least 1 enabled timer");
+        let mut max_sleep = self.timers[first_index]
             .time_left(Duration::default())?
             .unwrap_or_default();
         trace!(
@@ -283,6 +283,17 @@ where
 
         let relative_time = absolute_time - self.base_idle_time;
         trace!("Relative time: {:?}", relative_time);
+
+        if self.next_index == 0 {
+            // Normally the check for whether a timer is disabled or not is done when calculating
+            // the time until the next timer should pop. But in the case of the first timer being
+            // disabled, well, there's no previous timer to have done this check. So let's skip
+            // ahead.
+            //
+            // Note: We don't need to worry about what could happen if a timer is disabled midway,
+            // see the docs for `disabled` - it's expected to ignore these changes.
+            self.next_index = first_index;
+        }
 
         // When there's a next timer available, get the time until that activates
         if let Some(next) = self.timers.get_mut(self.next_index) {
@@ -299,29 +310,29 @@ where
                 }
                 // From now on, `relative_time` is invalid. Don't use it.
 
-                loop {
-                    self.next_index += 1;
+                // Thanks, clippy, but get_mut will fail far before this is even close to
+                // overflowing
+                #[allow(clippy::integer_arithmetic)]
+                {
+                    self.next_index = self.next_enabled(self.next_index + 1)
+                        .unwrap_or(self.timers.len());
+                }
 
-                    if let Some(next) = self.timers.get_mut(self.next_index) {
-                        if next.disabled() {
-                            trace!("Timer was disabled, going to next...");
-                            continue;
-                        }
-                        if let Some(remaining) = next.time_left(Duration::default())? {
-                            trace!(
-                                "Taking next-next timer into account. Remaining: {:?}",
-                                remaining
-                            );
-                            max_sleep = cmp::min(max_sleep, remaining);
-                        }
+                if let Some(next) = self.timers.get_mut(self.next_index) {
+                    assert!(!next.disabled());
+                    if let Some(remaining) = next.time_left(Duration::default())? {
+                        trace!(
+                            "Taking next-next timer into account. Remaining: {:?}",
+                            remaining
+                        );
+                        max_sleep = cmp::min(max_sleep, remaining);
                     }
-                    break;
                 }
             }
         }
 
-        // When there's a previous timer, respect that timer's abort
-        // urgency (see `Timer::abort_urgency()`)
+        // When there's a previous timer, respect that timer's abort urgency (see
+        // `Timer::abort_urgency()`)
         if let Some(abort) = self.previous() {
             if let Some(urgency) = abort.abort_urgency() {
                 trace!(

@@ -3,7 +3,7 @@ use crate::{timers::CmdTimer, App};
 
 use std::convert::TryInto;
 
-use xidlehook_core::Progress;
+use xidlehook_core::{Progress, Timer};
 
 impl App {
     pub fn handle_socket(&mut self, msg: Message) -> xidlehook_core::Result<Option<Reply>> {
@@ -23,12 +23,11 @@ impl App {
                 Ok(Some(Reply::Empty))
             },
             Message::Control(control) => {
-                let timers = self.xidlehook.timers();
+                let len = self.xidlehook.timers().len();
 
                 let mut removed = 0;
                 for id in control.timer.iter(
-                    timers
-                        .len()
+                    len
                         .try_into()
                         .expect("xidlehook does not yet handle this many timers"),
                 ) {
@@ -43,22 +42,35 @@ impl App {
                     }
 
                     match control.action {
-                        Action::Disable => timers[id].set_disabled(true),
-                        Action::Enable => timers[id].set_disabled(false),
+                        Action::Disable => {
+                            timers[id].set_disabled(true);
+                        },
+                        Action::Enable => {
+                            timers[id].set_disabled(false);
+                        },
                         Action::Trigger => {
                             if self.xidlehook.trigger(id, self.xcb.get_idle()?, true)?
-                                == Progress::Stop
+                            == Progress::Stop
                             {
                                 return Ok(None);
                             }
                         },
                         Action::Delete => {
-                            // TODO: Probably want to use `retain` to
-                            // optimize this...
+                            // TODO: Probably want to use `retain` to optimize this...
                             timers.remove(id);
-                            removed += 1;
+
+                            // Working with this large indices pointing to an allocated object... I
+                            // think we're fine
+                            #[allow(clippy::integer_arithmetic)]
+                            { removed += 1; }
                         },
                     }
+                }
+
+                let timers = self.xidlehook.timers_mut()?;
+                if timers.iter_mut().all(|timer| timer.disabled()) {
+                    println!("All timers were disabled... Goodbye");
+                    return Ok(None);
                 }
 
                 Ok(Some(Reply::Empty))

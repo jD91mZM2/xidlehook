@@ -63,6 +63,7 @@ impl Timer for CmdTimer {
             .checked_sub(idle_time)
             .filter(|&dur| dur != Duration::default()))
     }
+
     fn abort_urgency(&self) -> Option<Duration> {
         self.abortion.as_ref().map(|_| Duration::from_secs(1))
     }
@@ -99,6 +100,9 @@ where
 {
     time: Duration,
     f: F,
+
+    /// Whether or not to disable this timer
+    pub disabled: bool,
 }
 impl<'a> CallbackTimer<Box<dyn FnMut() + 'a>> {
     /// Create a new instance, which boxes the closure to a dynamic
@@ -125,7 +129,11 @@ where
     /// TL;DR: Don't use this unless you're planning on using another
     /// means of dynamic dispatch (an enum?) or if you're a masochist.
     pub fn new_unboxed(time: Duration, f: F) -> Self {
-        Self { time, f }
+        Self {
+            time,
+            f,
+            disabled: false,
+        }
     }
 }
 impl<F> Timer for CallbackTimer<F>
@@ -141,5 +149,8 @@ where
     fn activate(&mut self) -> Result<()> {
         (self.f)();
         Ok(())
+    }
+    fn disabled(&mut self) -> bool {
+        self.disabled
     }
 }
