@@ -4,7 +4,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use async_std::{task, sync};
+use async_std::{sync, task};
 use nix::{
     libc,
     sys::{

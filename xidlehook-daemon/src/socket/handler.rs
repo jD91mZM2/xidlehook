@@ -27,8 +27,7 @@ impl App {
 
                 let mut removed = 0;
                 for id in control.timer.iter(
-                    len
-                        .try_into()
+                    len.try_into()
                         .expect("xidlehook does not yet handle this many timers"),
                 ) {
                     let timers = self.xidlehook.timers_mut()?;
@@ -50,7 +49,7 @@ impl App {
                         },
                         Action::Trigger => {
                             if self.xidlehook.trigger(id, self.xcb.get_idle()?, true)?
-                            == Progress::Stop
+                                == Progress::Stop
                             {
                                 return Ok(None);
                             }
@@ -62,7 +61,9 @@ impl App {
                             // Working with this large indices pointing to an allocated object... I
                             // think we're fine
                             #[allow(clippy::integer_arithmetic)]
-                            { removed += 1; }
+                            {
+                                removed += 1;
+                            }
                         },
                     }
                 }

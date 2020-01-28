@@ -19,12 +19,7 @@
 
 use std::{fs, rc::Rc, time::Duration};
 
-use async_std::{
-    prelude::*,
-    future,
-    sync,
-    task,
-};
+use async_std::{future, prelude::*, sync, task};
 use log::{trace, warn};
 use nix::{libc, sys::signal::Signal};
 use structopt::StructOpt;
@@ -216,15 +211,15 @@ impl App {
                     if let Some(sig) = sig {
                         trace!("Signal received: {}", sig);
                         break;
-                        } else {
-                            signal_rx = None;
-                        }
-                    },
-                    Selected::Exit(res) => {
-                        res?;
-                        break;
-                    },
-                }
+                    } else {
+                        signal_rx = None;
+                    }
+                },
+                Selected::Exit(res) => {
+                    res?;
+                    break;
+                },
+            }
         }
 
         // Call signal handler to pretend there's a signal - which will

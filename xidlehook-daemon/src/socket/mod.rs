@@ -4,8 +4,7 @@ use async_std::{
     io::{BufReader, BufWriter},
     os::unix::net::UnixListener,
     prelude::*,
-    task,
-    sync,
+    sync, task,
 };
 use log::{trace, warn};
 

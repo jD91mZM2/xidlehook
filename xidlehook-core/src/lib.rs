@@ -179,7 +179,9 @@ where
             trace!("Timer {} was disabled, going to next...", index);
             // Thanks, clippy, but get_mut will fail far before this is even close to overflowing
             #[allow(clippy::integer_arithmetic)]
-            { index += 1; }
+            {
+                index += 1;
+            }
         }
         Some(index)
     }
@@ -267,7 +269,9 @@ where
 
         self.previous_idle_time = absolute_time;
 
-        let first_index = self.next_enabled(0).expect("there must always be at least 1 enabled timer");
+        let first_index = self
+            .next_enabled(0)
+            .expect("there must always be at least 1 enabled timer");
         let mut max_sleep = self.timers[first_index]
             .time_left(Duration::default())?
             .unwrap_or_default();
@@ -314,7 +318,8 @@ where
                 // overflowing
                 #[allow(clippy::integer_arithmetic)]
                 {
-                    self.next_index = self.next_enabled(self.next_index + 1)
+                    self.next_index = self
+                        .next_enabled(self.next_index + 1)
                         .unwrap_or(self.timers.len());
                 }
 
