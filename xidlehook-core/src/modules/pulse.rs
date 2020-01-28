@@ -31,7 +31,7 @@ pub struct NotWhenAudio {
     mainloop: Rc<RefCell<Mainloop>>,
 }
 impl NotWhenAudio {
-    /// Connect to PulseAudio and subscribe to notification of changes
+    /// Connect to `PulseAudio` and subscribe to notification of changes
     pub fn new() -> Result<Self> {
         let mainloop = Rc::new(RefCell::new(
             Mainloop::new().ok_or("pulseaudio: failed to create main loop")?,
@@ -75,7 +75,7 @@ impl NotWhenAudio {
             return Err(Error::from(format!(
                 "pulseaudio: failed to start mainloop: {}",
                 err
-            )))?;
+            )));
         }
 
         // Wait for context to be ready
@@ -107,7 +107,7 @@ impl NotWhenAudio {
                 .get_sink_input_info_list(move |res| match res {
                     ListResult::Item(item) => {
                         if !item.corked {
-                            let count = counter.in_progress.get() + 1;
+                            let count = counter.in_progress.get().saturating_add(1);
                             counter.in_progress.set(count);
                             debug!("Partial count: {}", count);
                         }
@@ -127,7 +127,6 @@ impl NotWhenAudio {
         {
             let ctx_ref = Rc::clone(&ctx);
             let counter_ref = Rc::clone(&counter);
-            let get_sinks = get_sinks.clone();
 
             ctx.borrow_mut()
                 .set_subscribe_callback(Some(Box::new(move |_, _, _| {

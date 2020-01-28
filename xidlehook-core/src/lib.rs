@@ -17,6 +17,10 @@
     clippy::pedantic,
     clippy::print_stdout,
 )]
+#![allow(
+    // I don't agree with this lint
+    clippy::must_use_candidate,
+)]
 
 //! Instead of implementing your extension as something that
 //! communicates with xidlehook, what about implementing your
@@ -320,7 +324,7 @@ where
                 {
                     self.next_index = self
                         .next_enabled(self.next_index + 1)
-                        .unwrap_or(self.timers.len());
+                        .unwrap_or_else(|| self.timers.len());
                 }
 
                 if let Some(next) = self.timers.get_mut(self.next_index) {

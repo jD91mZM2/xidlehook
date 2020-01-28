@@ -14,8 +14,6 @@
     clippy::integer_division,
     clippy::pedantic,
 )]
-// clippy is reacting on structopt macro
-#![allow(clippy::option_map_unwrap_or_else)]
 
 use std::{fs, rc::Rc, time::Duration};
 
