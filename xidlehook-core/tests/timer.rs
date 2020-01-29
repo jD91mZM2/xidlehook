@@ -78,10 +78,10 @@ fn disabled_timers() {
 
     // Just one good old test round first
     assert_eq!(timer.poll(TEST_UNIT * 00).unwrap(), Some(TEST_UNIT * 08));
-    assert_eq!(timer.poll(TEST_UNIT * 08).unwrap(), Some(TEST_UNIT * 08)); // timer 1
-    assert_eq!(timer.poll(TEST_UNIT * 24).unwrap(), Some(TEST_UNIT * 04)); // timer 2
-    assert_eq!(timer.poll(TEST_UNIT * 28).unwrap(), Some(TEST_UNIT * 06)); // timer 3
-    assert_eq!(timer.poll(TEST_UNIT * 34).unwrap(), Some(TEST_UNIT * 08)); // timer 4
+    assert_eq!(timer.poll(TEST_UNIT * 08).unwrap(), Some(TEST_UNIT * 08)); // timer 0
+    assert_eq!(timer.poll(TEST_UNIT * 24).unwrap(), Some(TEST_UNIT * 04)); // timer 1
+    assert_eq!(timer.poll(TEST_UNIT * 28).unwrap(), Some(TEST_UNIT * 06)); // timer 2
+    assert_eq!(timer.poll(TEST_UNIT * 34).unwrap(), Some(TEST_UNIT * 08)); // timer 3
     assert_eq!(triggered.get(), 0b1111);
 
     // Now disable the first timer and reset
@@ -90,11 +90,11 @@ fn disabled_timers() {
 
     // Make sure first timer is ignored
     assert_eq!(timer.poll(TEST_UNIT * 00).unwrap(), Some(TEST_UNIT * 16));
-    assert_eq!(timer.poll(TEST_UNIT * 08).unwrap(), Some(TEST_UNIT * 08)); // ~timer 1~
+    assert_eq!(timer.poll(TEST_UNIT * 08).unwrap(), Some(TEST_UNIT * 08)); // ~timer 0~
     assert_eq!(triggered.get(), 0b0000);
-    assert_eq!(timer.poll(TEST_UNIT * 16).unwrap(), Some(TEST_UNIT * 04)); // timer 2
-    assert_eq!(timer.poll(TEST_UNIT * 20).unwrap(), Some(TEST_UNIT * 06)); // timer 3
-    assert_eq!(timer.poll(TEST_UNIT * 26).unwrap(), Some(TEST_UNIT * 16)); // timer 4
+    assert_eq!(timer.poll(TEST_UNIT * 16).unwrap(), Some(TEST_UNIT * 04)); // timer 1
+    assert_eq!(timer.poll(TEST_UNIT * 20).unwrap(), Some(TEST_UNIT * 06)); // timer 2
+    assert_eq!(timer.poll(TEST_UNIT * 26).unwrap(), Some(TEST_UNIT * 16)); // timer 3
     assert_eq!(triggered.get(), 0b1110);
 
     // Now disable a timer in the middle and reset
@@ -103,10 +103,29 @@ fn disabled_timers() {
 
     // Make sure first timer is ignored
     assert_eq!(timer.poll(TEST_UNIT * 00).unwrap(), Some(TEST_UNIT * 16));
-    assert_eq!(timer.poll(TEST_UNIT * 08).unwrap(), Some(TEST_UNIT * 08)); // ~timer 1~
+    assert_eq!(timer.poll(TEST_UNIT * 08).unwrap(), Some(TEST_UNIT * 08)); // ~timer 0~
     assert_eq!(triggered.get(), 0b0000);
-    assert_eq!(timer.poll(TEST_UNIT * 16).unwrap(), Some(TEST_UNIT * 06)); // timer 2
-    assert_eq!(timer.poll(TEST_UNIT * 20).unwrap(), Some(TEST_UNIT * 02)); // ~timer 3~
-    assert_eq!(timer.poll(TEST_UNIT * 22).unwrap(), Some(TEST_UNIT * 16)); // timer 4
+    assert_eq!(timer.poll(TEST_UNIT * 16).unwrap(), Some(TEST_UNIT * 06)); // timer 1
+    assert_eq!(timer.poll(TEST_UNIT * 20).unwrap(), Some(TEST_UNIT * 02)); // ~timer 2~
+    assert_eq!(timer.poll(TEST_UNIT * 22).unwrap(), Some(TEST_UNIT * 16)); // timer 3
     assert_eq!(triggered.get(), 0b1010);
+
+    // Now disable all remaining timers and reset
+    timer.timers_mut().unwrap()[1].disabled = true;
+    timer.timers_mut().unwrap()[3].disabled = true;
+    triggered.set(0);
+
+    // Make sure xidlehook doesn't panic
+    let long_sleep = Duration::from_secs(u32::max_value().into());
+    assert_eq!(timer.poll(TEST_UNIT * 00).unwrap(), Some(long_sleep));
+    assert_eq!(timer.poll(long_sleep).unwrap(), Some(long_sleep));
+    assert_eq!(triggered.get(), 0b0000);
+
+    // ... and make sure re-enabling is fine
+    timer.timers_mut().unwrap()[2].disabled = false;
+
+    assert_eq!(timer.poll(TEST_UNIT * 00).unwrap(), Some(TEST_UNIT * 04));
+    assert_eq!(triggered.get(), 0b0000);
+    assert_eq!(timer.poll(TEST_UNIT * 04).unwrap(), Some(TEST_UNIT * 04));
+    assert_eq!(triggered.get(), 0b0100);
 }
