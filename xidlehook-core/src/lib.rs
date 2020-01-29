@@ -260,10 +260,6 @@ where
     /// Polls the scheduler for any activated timers. On success, returns the max amount of time a
     /// program can sleep for. Only fatal errors cause this function to return, and at that point,
     /// the state of xidlehook is undefined so it should not be used.
-    ///
-    /// # Panics
-    ///
-    /// Panics when there are no *enabled* timers added - there must always be at least one.
     pub fn poll(&mut self, absolute_time: Duration) -> Result<Option<Duration>> {
         if absolute_time < self.previous_idle_time {
             // If the idle time has decreased, the only reasonable explanation is that the user
@@ -273,9 +269,18 @@ where
 
         self.previous_idle_time = absolute_time;
 
-        let first_index = self
-            .next_enabled(0)
-            .expect("there must always be at least 1 enabled timer");
+        let first_index = match self.next_enabled(0) {
+            Some(index) => index,
+
+            // There are no enabled timers... As requested by user @desbma on GitHub, it makes most
+            // sense to leave xidlehook doing nothing, as it can still be activated using other
+            // means such as the socket API. See the message:
+            // https://github.com/jD91mZM2/xidlehook/issues/35#issuecomment-579495447
+            //
+            // This isn't `u64::max_value()` because loads of things overflow and panic.
+            None => return Ok(Some(Duration::from_secs(u32::max_value().into()))),
+        };
+
         let mut max_sleep = self.timers[first_index]
             .time_left(Duration::default())?
             .unwrap_or_default();

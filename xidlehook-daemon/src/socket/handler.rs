@@ -3,7 +3,7 @@ use crate::{timers::CmdTimer, App};
 
 use std::convert::TryInto;
 
-use xidlehook_core::{Progress, Timer};
+use xidlehook_core::Progress;
 
 impl App {
     pub fn handle_socket(&mut self, msg: Message) -> xidlehook_core::Result<Option<Reply>> {
@@ -66,12 +66,6 @@ impl App {
                             }
                         },
                     }
-                }
-
-                let timers = self.xidlehook.timers_mut()?;
-                if timers.iter_mut().all(|timer| timer.disabled()) {
-                    println!("All timers were disabled... Goodbye");
-                    return Ok(None);
                 }
 
                 Ok(Some(Reply::Empty))
