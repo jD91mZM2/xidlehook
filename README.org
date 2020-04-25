@@ -148,3 +148,8 @@ xidlehook-client --socket /path/to/xidlehook.sock control --action trigger --tim
 If you're looking for a more elaborate client to temporarily disable
 =xidlehook=, take a look at [[https://github.com/rschmukler/caffeinate][caffeinate]] which has timers and PID based
 monitoring.
+
+** Troubleshooting
+
+If you have =redshift= running, the brightness of your screen will be quickly overriden by =redshift=.
+You can specify the brightness of the screen via =redshift= instead of =xrandr= to fix this issue.
