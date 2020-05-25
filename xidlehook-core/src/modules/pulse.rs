@@ -174,7 +174,7 @@ impl Module for NotWhenAudio {
         if players == 0 {
             Ok(Progress::Continue)
         } else {
-            Ok(Progress::Abort)
+            Ok(Progress::Reset)
         }
     }
 }

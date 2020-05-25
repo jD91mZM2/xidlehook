@@ -14,7 +14,6 @@
     clippy::get_unwrap,
     clippy::integer_arithmetic,
     clippy::integer_division,
-    clippy::pedantic,
     clippy::print_stdout,
 )]
 #![allow(
@@ -208,6 +207,24 @@ where
         absolute_time: Duration,
         force: bool,
     ) -> Result<Progress> {
+        macro_rules! handle {
+            ($progress:expr) => {
+                match $progress {
+                    Progress::Continue => (),
+                    Progress::Abort => {
+                        trace!("Module requested abort of chain.");
+                        self.abort()?;
+                        return Ok(Progress::Abort);
+                    },
+                    Progress::Reset => {
+                        trace!("Module requested reset of chain.");
+                        self.reset()?;
+                        return Ok(Progress::Reset);
+                    },
+                    Progress::Stop => return Ok(Progress::Stop),
+                }
+            };
+        }
         trace!("Activating timer {}", index);
 
         let timer_info = TimerInfo {
@@ -219,15 +236,7 @@ where
 
         match self.module.pre_timer(timer_info) {
             Ok(_) if force => (),
-
-            Ok(Progress::Continue) => (),
-            Ok(Progress::Abort) => {
-                trace!("Module requested abort of chain.");
-                self.abort()?;
-                return Ok(Progress::Abort);
-            },
-            Ok(Progress::Stop) => return Ok(Progress::Stop),
-
+            Ok(progress) => handle!(progress),
             Err(err) => {
                 self.module.warning(&err)?;
             },
@@ -241,14 +250,7 @@ where
         self.base_idle_time = absolute_time;
 
         match self.module.post_timer(timer_info) {
-            Ok(Progress::Continue) => (),
-            Ok(Progress::Abort) => {
-                trace!("Module requested abort of chain.");
-                self.abort()?;
-                return Ok(Progress::Abort);
-            },
-            Ok(Progress::Stop) => return Ok(Progress::Stop),
-
+            Ok(progress) => handle!(progress),
             Err(err) => {
                 self.module.warning(&err)?;
             },
@@ -290,7 +292,7 @@ where
         );
 
         if self.aborted {
-            // This chain was aborted, so don't pursue it
+            trace!("This chain was aborted, I won't pursue it");
             return Ok(Some(max_sleep));
         }
 
@@ -319,6 +321,7 @@ where
                 match self.trigger(self.next_index, absolute_time, false)? {
                     Progress::Continue => (),
                     Progress::Abort => return Ok(Some(max_sleep)),
+                    Progress::Reset => return Ok(Some(max_sleep)),
                     Progress::Stop => return Ok(None),
                 }
                 // From now on, `relative_time` is invalid. Don't use it.

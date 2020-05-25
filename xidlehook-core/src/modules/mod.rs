@@ -11,8 +11,15 @@ use log::warn;
 pub enum Progress {
     /// Continue the program, no action taken.
     Continue,
-    /// Abort this chain, don't pursue it any longer.
+    /// Abort this chain, don't pursue it any longer. The timers won't be
+    /// checked again, until the user is active.
     Abort,
+    /// Like abort, but is immediately ready to check timers again. See
+    /// https://github.com/jD91mZM2/xidlehook/issues/43 for a quick description
+    /// of why this exists: When an application goes out of fullscreen, you
+    /// don't want to re-check it all the time. But an application can stop
+    /// playing audio without user interaction.
+    Reset,
     /// Stop the program completely. Use this sparingly.
     Stop,
 }
