@@ -13,7 +13,6 @@ keywords = ["xorg", "x", "timer"]
 categories = ["date-and-time", "command-line-utilities"]
 
 [dependencies]
-async-std = { version = "1.2.0", features = ["unstable"] }
 env_logger = "0.7.1"
 futures = "0.3.1"
 log = "0.4.8"
@@ -22,7 +21,8 @@ serde = { version = "1.0.103", features = ["derive"] }
 serde_json = "1.0.42"
 structopt = "0.3.5"
 xcb = { version = "0.9.0", features = ["x11", "screensaver"] }
-xidlehook-core = { version = "0.1.1", default-features = false, features = ["async-std"] }
+xidlehook-core = { version = "0.1.1", default-features = false, features = ["tokio"] }
+tokio = { version = "0.2.21", features = ["io-util", "macros", "rt-core", "signal", "stream", "sync", "uds"] }
 
 [features]
 default = ["pulse"]

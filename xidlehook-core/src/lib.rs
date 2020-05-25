@@ -445,7 +445,7 @@ where
     }
 
     /// Runs a standard poll-sleep-repeat loop... asynchronously.
-    #[cfg(feature = "async-std")]
+    #[cfg(any(feature = "async-std", feature = "tokio"))]
     pub async fn main_async(&mut self, xcb: &self::modules::Xcb) -> Result<()> {
         loop {
             let idle = xcb.get_idle()?;
@@ -455,7 +455,11 @@ where
             };
 
             trace!("Sleeping for {:?}", delay);
+
+            #[cfg(feature = "async-std")]
             async_std::task::sleep(delay).await;
+            #[cfg(feature = "tokio")]
+            tokio::time::delay_for(delay).await;
         }
         Ok(())
     }

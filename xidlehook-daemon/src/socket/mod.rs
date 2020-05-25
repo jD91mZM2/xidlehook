@@ -1,10 +1,10 @@
 use std::convert::Infallible;
 
-use async_std::{
+use tokio::{
     io::{BufReader, BufWriter},
-    os::unix::net::UnixListener,
+    net::UnixListener,
     prelude::*,
-    sync, task,
+    sync::{mpsc, oneshot},
 };
 use log::{trace, warn};
 
@@ -15,24 +15,23 @@ pub use self::models::*;
 
 pub async fn main_loop(
     address: &str,
-    socket_tx: sync::Sender<(Message, sync::Sender<Reply>)>,
+    socket_tx: mpsc::Sender<(Message, oneshot::Sender<Reply>)>,
 ) -> xidlehook_core::Result<Infallible> {
-    let listener = UnixListener::bind(address).await?;
+    let mut listener = UnixListener::bind(address)?;
     trace!("Bound unix listener on address {:?}", address);
 
     loop {
-        let (stream, addr) = listener.accept().await?;
+        let (mut stream, addr) = listener.accept().await?;
         trace!("Connection from {:?}", addr);
 
-        let socket_tx = socket_tx.clone();
-        task::spawn(async move {
-            let reader = BufReader::new(&stream);
-            let mut writer = BufWriter::new(&stream);
+        let mut socket_tx = socket_tx.clone();
+        tokio::spawn(async move {
+            let (reader, writer) = stream.split();
+            let reader = BufReader::new(reader);
+            let mut writer = BufWriter::new(writer);
             let mut lines = reader.lines();
-            while let Some(msg) = lines.next().await {
-                let res = msg
-                    .map_err(|err| err.to_string())
-                    .and_then(|msg| serde_json::from_str(&msg).map_err(|err| err.to_string()));
+            while let Some(msg) = lines.next_line().await.ok().and_then(|inner| inner) {
+                let res = serde_json::from_str(&msg).map_err(|err| err.to_string());
 
                 let msg: Message = match res {
                     Ok(json) => json,
@@ -42,10 +41,13 @@ pub async fn main_loop(
                     },
                 };
 
-                let (reply_tx, reply_rx) = sync::channel(1);
-                socket_tx.send((msg, reply_tx)).await;
+                let (reply_tx, reply_rx) = oneshot::channel();
+                socket_tx.send((msg, reply_tx)).await.expect("receiver closed too early");
 
-                let reply = reply_rx.recv().await;
+                let reply = match reply_rx.await {
+                    Ok(reply) => reply,
+                    Err(_) => break,
+                };
 
                 let res = async {
                     let msg = serde_json::to_vec(&reply)?;

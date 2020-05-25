@@ -12,21 +12,19 @@
     clippy::get_unwrap,
     clippy::integer_arithmetic,
     clippy::integer_division,
-    clippy::pedantic,
 )]
 
 use std::{fs, rc::Rc, time::Duration};
 
-use async_std::{future, prelude::*, sync, task};
+use tokio::{stream::{self, StreamExt}, sync::mpsc, signal::unix::{signal, SignalKind}};
 use log::{trace, warn};
-use nix::{libc, sys::signal::Signal};
+use nix::sys::wait;
 use structopt::StructOpt;
 use xidlehook_core::{
     modules::{StopAt, Xcb},
     Module, Xidlehook,
 };
 
-mod signal_handler;
 mod socket;
 mod timers;
 
@@ -77,7 +75,8 @@ pub struct Opt {
     pub socket: Option<String>,
 }
 
-fn main() -> xidlehook_core::Result<()> {
+#[tokio::main]
+async fn main() -> xidlehook_core::Result<()> {
     env_logger::init();
 
     let opt = Opt::from_args();
@@ -129,8 +128,7 @@ fn main() -> xidlehook_core::Result<()> {
         opt,
         xcb,
         xidlehook,
-    }
-    .main_loop()
+    }.main_loop().await
 }
 
 struct App {
@@ -139,12 +137,12 @@ struct App {
     xidlehook: Xidlehook<CmdTimer, ((), Vec<Box<dyn Module>>)>,
 }
 impl App {
-    fn main_loop(&mut self) -> xidlehook_core::Result<()> {
-        let (socket_tx, socket_rx) = sync::channel(4);
+    async fn main_loop(&mut self) -> xidlehook_core::Result<()> {
+        let (socket_tx, socket_rx) = mpsc::channel(4);
         let _scope = if let Some(address) = self.opt.socket.clone() {
             {
                 let address = address.clone();
-                task::spawn(async move {
+                tokio::spawn(async move {
                     if let Err(err) = socket::main_loop(&address, socket_tx).await {
                         warn!("Socket handling errored: {}", err);
                     }
@@ -158,73 +156,49 @@ impl App {
             None
         };
 
-        let (signal_tx, signal_rx) = sync::channel(1);
-        let signal_thread = signal_handler::handle_signals(signal_tx)?;
-
         let mut socket_rx = Some(socket_rx);
-        let mut signal_rx = Some(signal_rx);
+
+        let mut sigint = signal(SignalKind::interrupt())?;
+        let mut sigchld = signal(SignalKind::child())?;
 
         loop {
-            enum Selected {
-                Socket(Option<(socket::Message, sync::Sender<socket::Reply>)>),
-                Signal(Option<Signal>),
-                Exit(xidlehook_core::Result<()>),
-            }
-
-            let a = async {
-                if let Some(ref rx) = socket_rx {
-                    Selected::Socket(rx.recv().await)
+            let socket_msg = async {
+                if let Some(ref mut rx) = socket_rx {
+                    rx.recv().await
                 } else {
-                    future::pending().await
-                }
-            };
-            let b = async {
-                if let Some(ref rx) = signal_rx {
-                    Selected::Signal(rx.recv().await)
-                } else {
-                    future::pending().await
+                    // TODO: use future::pending() when released
+                    stream::pending::<()>().next().await;
+                    unreachable!();
                 }
             };
 
-            let c = async {
-                let status = self.xidlehook.main_async(&self.xcb).await;
-                Selected::Exit(status)
-            };
-            let res = task::block_on(a.race(b).race(c));
-
-            match res {
-                Selected::Socket(data) => {
+            tokio::select! {
+                data = socket_msg => {
                     if let Some((msg, reply)) = data {
                         trace!("Got command over socket: {:#?}", msg);
                         let response = match self.handle_socket(msg)? {
                             Some(response) => response,
                             None => break,
                         };
-                        task::block_on(reply.send(response));
+                        let _ = reply.send(response);
                     } else {
                         socket_rx = None;
                     }
                 },
-                Selected::Signal(sig) => {
-                    if let Some(sig) = sig {
-                        trace!("Signal received: {}", sig);
-                        break;
-                    } else {
-                        signal_rx = None;
-                    }
-                },
-                Selected::Exit(res) => {
+                res = self.xidlehook.main_async(&self.xcb) => {
                     res?;
                     break;
                 },
+                _ = sigint.recv() => {
+                    trace!("SIGINT received");
+                    break;
+                },
+                _ = sigchld.recv() => {
+                    trace!("Waiting for child process");
+                    let _ = wait::waitpid(None, Some(wait::WaitPidFlag::WNOHANG));
+                },
             }
         }
-
-        // Call signal handler to pretend there's a signal - which will
-        // cause thread to exit
-        signal_handler::handler(Signal::SIGINT as i32 as libc::c_int);
-
-        signal_thread.join().unwrap()?;
 
         Ok(())
     }
