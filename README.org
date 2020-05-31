@@ -63,7 +63,7 @@ will get you a sane default configuration of xidlehook as well as all
 required libraries.
 
 #+BEGIN_SRC sh
-nix-env -iA xidlehook
+nix-env -iA nixpkgs.xidlehook
 #+END_SRC
 
 will install xidlehook regardless of whether you have rust installed,
