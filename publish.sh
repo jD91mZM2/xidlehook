@@ -9,27 +9,39 @@ eval "$VISUAL" README.md
 echo "Looks good? Press enter to continue."
 read -r
 
-echo "Running tests..."
-cargo check
-cargo test
-
 do_package() {
+    echo "Running tests..."
+    cargo check --manifest-path "$1/Cargo.toml"
+    cargo test --manifest-path "$1/Cargo.toml"
+
+    # If the lock file is changed, update that
+    git reset
+    git add "$1/Cargo.lock"
+    git commit --amend --no-edit
+
     echo "Making sure packaging works..."
     cargo publish --dry-run --manifest-path "$1"/Cargo.toml
 
-    version="$(sed -e 's/^version\s*=\s*"\([0-9]\+\.[0-9]\+\.[0-9]\+\)"/\1/' -e t -e d "$1"/Cargo.toml | head -n1)"
-
     git status
 
-    echo "Publishing version $version of $1!!! Press enter to continue."
+    echo "Publishing $1!!! Press enter to continue."
     read -r
 
     cargo publish --manifest-path "$1"/Cargo.toml
 }
 
+mv Cargo.toml Cargo.toml.bak
+cleanup() {
+    mv Cargo.toml.bak Cargo.toml
+}
+trap cleanup SIGINT
+
 do_package xidlehook-core
 echo "Waiting for crates.io to update"
 sleep 5
 
-do_package xidlehook-daemon # sets "$version"
-git tag "$version" --annotate --sign -m "xidlehook $version"
+do_package xidlehook-daemon
+
+echo "Now make a tag! Yay!"
+
+cleanup
