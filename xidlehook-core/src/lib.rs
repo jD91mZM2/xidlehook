@@ -30,7 +30,7 @@
 
 use std::{cmp, convert::TryInto, fmt, ptr, time::Duration};
 
-use log::trace;
+use log::{trace, warn};
 use nix::libc;
 
 /// The default error type for xidlehook. Unfortunately, it's a
@@ -55,6 +55,18 @@ pub struct TimerInfo {
     pub index: usize,
     /// The length of the timer list
     pub length: usize,
+}
+
+/// Return value of `poll`, which specifies what one should do next: sleep,
+/// wait forever (until client modifies the xidlehook instance),
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+    /// Sleep for (at most) a specified duration
+    Sleep(Duration),
+    /// Xidlehook has nothing to do, so you should effectively wait forever until the client modifies the xidlehook instance
+    Forever,
+    /// A module wants xidlehook to quit
+    Quit,
 }
 
 /// The main xidlehook instance that allows you to schedule things
@@ -262,7 +274,7 @@ where
     /// Polls the scheduler for any activated timers. On success, returns the max amount of time a
     /// program can sleep for. Only fatal errors cause this function to return, and at that point,
     /// the state of xidlehook is undefined so it should not be used.
-    pub fn poll(&mut self, absolute_time: Duration) -> Result<Option<Duration>> {
+    pub fn poll(&mut self, absolute_time: Duration) -> Result<Action> {
         if absolute_time < self.previous_idle_time {
             // If the idle time has decreased, the only reasonable explanation is that the user
             // briefly wasn't idle.
@@ -278,9 +290,7 @@ where
             // sense to leave xidlehook doing nothing, as it can still be activated using other
             // means such as the socket API. See the message:
             // https://github.com/jD91mZM2/xidlehook/issues/35#issuecomment-579495447
-            //
-            // This isn't `u64::max_value()` because loads of things overflow and panic.
-            None => return Ok(Some(Duration::from_secs(u32::max_value().into()))),
+            None => return Ok(Action::Forever),
         };
 
         let mut max_sleep = self.timers[first_index]
@@ -293,7 +303,7 @@ where
 
         if self.aborted {
             trace!("This chain was aborted, I won't pursue it");
-            return Ok(Some(max_sleep));
+            return Ok(Action::Sleep(max_sleep));
         }
 
         let relative_time = absolute_time - self.base_idle_time;
@@ -320,11 +330,12 @@ where
 
                 match self.trigger(self.next_index, absolute_time, false)? {
                     Progress::Continue => (),
-                    Progress::Abort => return Ok(Some(max_sleep)),
-                    Progress::Reset => return Ok(Some(max_sleep)),
-                    Progress::Stop => return Ok(None),
+                    Progress::Abort => return Ok(Action::Sleep(max_sleep)),
+                    Progress::Reset => return Ok(Action::Sleep(max_sleep)),
+                    Progress::Stop => return Ok(Action::Quit),
                 }
-                // From now on, `relative_time` is invalid. Don't use it.
+
+                // From now on, `relative_time` is outdated. Don't use it.
 
                 // Thanks, clippy, but get_mut will fail far before this is even close to
                 // overflowing
@@ -360,7 +371,7 @@ where
             }
         }
 
-        Ok(Some(max_sleep))
+        Ok(Action::Sleep(max_sleep))
     }
 
     /// Runs a standard poll-sleep-repeat loop.
@@ -415,26 +426,31 @@ where
     {
         loop {
             let idle = xcb.get_idle()?;
-            let delay = match self.poll(idle)? {
-                Some(delay) => delay,
-                None => break,
-            };
+            match self.poll(idle)? {
+                Action::Sleep(delay) => {
+                    trace!("Sleeping for {:?}", delay);
 
-            trace!("Sleeping for {:?}", delay);
-
-            // This sleep, unlike `thread::sleep`, will stop for signals.
-            unsafe {
-                libc::nanosleep(
-                    &libc::timespec {
-                        tv_sec: delay
-                            .as_secs()
-                            .try_into()
-                            .expect("woah that's one large number"),
-                        tv_nsec: delay.subsec_nanos().into(),
-                    },
-                    ptr::null_mut(),
-                );
+                    // This sleep, unlike `thread::sleep`, will stop for signals.
+                    unsafe {
+                        libc::nanosleep(
+                            &libc::timespec {
+                                tv_sec: delay
+                                    .as_secs()
+                                    .try_into()
+                                    .expect("woah that's one large number"),
+                                tv_nsec: delay.subsec_nanos().into(),
+                            },
+                            ptr::null_mut(),
+                        );
+                    }
+                },
+                Action::Forever => {
+                    warn!("xidlehook has not, and will never get, anything to do");
+                    break;
+                },
+                Action::Quit => break,
             }
+
 
             if callback() {
                 // Oh look, the callback wants us to exit
@@ -449,17 +465,31 @@ where
     pub async fn main_async(&mut self, xcb: &self::modules::Xcb) -> Result<()> {
         loop {
             let idle = xcb.get_idle()?;
-            let delay = match self.poll(idle)? {
-                Some(delay) => delay,
-                None => break,
-            };
+            match self.poll(idle)? {
+                Action::Sleep(delay) => {
+                    trace!("Sleeping for {:?}", delay);
 
-            trace!("Sleeping for {:?}", delay);
+                    #[cfg(feature = "async-std")]
+                    async_std::task::sleep(delay).await;
+                    #[cfg(feature = "tokio")]
+                    if cfg!(not(feature = "async-std")) {
+                        tokio::time::delay_for(delay).await;
+                    }
+                },
+                Action::Forever => {
+                    trace!("Nothing to do");
 
-            #[cfg(feature = "async-std")]
-            async_std::task::sleep(delay).await;
-            #[cfg(feature = "tokio")]
-            tokio::time::delay_for(delay).await;
+                    #[cfg(feature = "async-std")]
+                    async_std::future::pending::<()>().await;
+                    #[cfg(feature = "tokio")]
+                    if cfg!(not(feature = "async-std")) {
+                        use tokio::stream::StreamExt;
+                        tokio::stream::pending::<()>().next().await;
+                    }
+                }
+                Action::Quit => break,
+            }
+
         }
         Ok(())
     }

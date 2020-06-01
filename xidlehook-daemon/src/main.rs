@@ -10,7 +10,6 @@
     clippy::decimal_literal_representation,
     clippy::float_cmp_const,
     clippy::get_unwrap,
-    clippy::integer_arithmetic,
     clippy::integer_division,
 )]
 

@@ -60,10 +60,7 @@ impl App {
 
                             // Working with this large indices pointing to an allocated object... I
                             // think we're fine
-                            #[allow(clippy::integer_arithmetic)]
-                            {
-                                removed += 1;
-                            }
+                            removed += 1;
                         },
                     }
                 }

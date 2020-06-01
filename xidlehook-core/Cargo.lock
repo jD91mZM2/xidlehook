@@ -684,6 +684,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d099fa27b9702bed751524694adbe393e18b36b204da91eb1cbbbbb4a5ee2d58"
 dependencies = [
  "bytes",
+ "futures-core",
  "pin-project-lite",
  "slab",
 ]
@@ -873,7 +874,7 @@ dependencies = [
 
 [[package]]
 name = "xidlehook-core"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "async-std",
  "env_logger",

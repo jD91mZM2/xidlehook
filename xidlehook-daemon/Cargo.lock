@@ -771,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "xidlehook"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "env_logger",
  "futures",
@@ -787,9 +787,9 @@ dependencies = [
 
 [[package]]
 name = "xidlehook-core"
-version = "0.1.2"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bf1ff256e90ad8c8754a4d13638ee17671528c6b266fd94db1bd929e16d1365"
+checksum = "c1e8b005055a0f472f31cbb66120d3a0e9127dc7830118445b8d48a1974b195d"
 dependencies = [
  "libpulse-binding",
  "log",

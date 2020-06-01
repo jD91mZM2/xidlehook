@@ -9,13 +9,16 @@ eval "$VISUAL" README.md
 echo "Looks good? Press enter to continue."
 read -r
 
+git reset
+
 do_package() {
     echo "Running tests..."
     cargo check --manifest-path "$1/Cargo.toml"
     cargo test --manifest-path "$1/Cargo.toml"
+    cargo check --all-features --manifest-path "$1/Cargo.toml"
+    cargo test --all-features --manifest-path "$1/Cargo.toml"
 
     # If the lock file is changed, update that
-    git reset
     git add "$1/Cargo.lock"
     git commit --amend --no-edit
 
@@ -42,6 +45,17 @@ sleep 5
 
 do_package xidlehook-daemon
 
-echo "Now make a tag! Yay!"
+echo "Now updating root lock file"
+rm Cargo.lock
+cargo check
+git add Cargo.lock
+git commit --amend --no-edit
 
+echo "Trying nix build"
+cargo2nix generate
+nix-build .
+git add Cargo.nix
+git commit --amend --no-edit
+
+echo "Now make a tag! Yay!"
 cleanup
