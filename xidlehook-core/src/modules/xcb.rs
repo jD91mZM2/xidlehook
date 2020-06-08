@@ -71,6 +71,7 @@ impl Xcb {
         // &[Atom], as we specified we want an atom.
         let value = prop.value();
 
+        debug!("xcb::xproto::get_input_focus(...) = {}", focused_window);
         debug!("xcb::xproto::get_property(...) = {:?}", value);
         debug!(
             "NET_WM_STATE_FULLSCREEN = {:?}",
