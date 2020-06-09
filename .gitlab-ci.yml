@@ -24,6 +24,7 @@ cache-nix-build:
     - gitlab-ci
   before_script:
     - nix-channel --list
+    - nix-channel --update
     - nix-env -iA nixpkgs.git
     - nix-env -iA cachix -f https://cachix.org/api/v1/install
   script:
