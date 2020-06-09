@@ -49,41 +49,48 @@ impl Xcb {
         let info = xcb::screensaver::query_info(&self.conn, self.root_window).get_reply()?;
         Ok(Duration::from_millis(info.ms_since_user_input().into()))
     }
+
+    fn query_fullscreen(&self, root: xcb::Window) -> Result<bool> {
+        let windows = xcb::xproto::query_tree(&self.conn, root).get_reply()?;
+
+        for &window in windows.children() {
+            let prop = xcb::xproto::get_property(
+                &self.conn,             // c
+                false,                  // delete
+                window,                 // window
+                self.atom_net_wm_state, // property
+                xcb::xproto::ATOM_ATOM, // type_
+                0,                      // long_offset
+                u32::max_value(),       // long_length
+            ).get_reply()?;
+
+            // The safe API can't possibly know what value xcb returned,
+            // sadly. Here we are manually transmuting &[c_void] to
+            // &[Atom], as we specified we want an atom.
+            let value = prop.value();
+
+            let value = unsafe {
+                slice::from_raw_parts(value.as_ptr() as *const xcb::xproto::Atom, value.len())
+            };
+
+            if value.iter().any(|atom| *atom == self.atom_net_wm_state_fullscreen) {
+                debug!("Window {} was fullscreen", window);
+                return Ok(true);
+            }
+
+            if self.query_fullscreen(window)? {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
     /// Get whether or not the user's currently active window is
     /// fullscreen
     pub fn get_fullscreen(&self) -> Result<bool> {
-        let focused_window = xcb::xproto::get_input_focus(&self.conn)
-            .get_reply()?
-            .focus();
-        let prop = xcb::xproto::get_property(
-            &self.conn,             // c
-            false,                  // delete
-            focused_window,         // window
-            self.atom_net_wm_state, // property
-            xcb::xproto::ATOM_ATOM, // type_
-            0,                      // long_offset
-            u32::max_value(),       // long_length
-        )
-        .get_reply()?;
-
-        // The safe API can't possibly know what value xcb returned,
-        // sadly. Here we are manually transmuting &[c_void] to
-        // &[Atom], as we specified we want an atom.
-        let value = prop.value();
-
-        debug!("xcb::xproto::get_input_focus(...) = {}", focused_window);
-        debug!("xcb::xproto::get_property(...) = {:?}", value);
-        debug!(
-            "NET_WM_STATE_FULLSCREEN = {:?}",
-            self.atom_net_wm_state_fullscreen
-        );
-
-        let value = unsafe {
-            slice::from_raw_parts(value.as_ptr() as *const xcb::xproto::Atom, value.len())
-        };
-
-        for &atom in value {
-            if atom == self.atom_net_wm_state_fullscreen {
+        for screen in self.conn.get_setup().roots() {
+            if self.query_fullscreen(screen.root())? {
                 return Ok(true);
             }
         }
