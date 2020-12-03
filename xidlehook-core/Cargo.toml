@@ -23,7 +23,7 @@ tokio = { version = "0.2.21", optional = true, features = ["time", "stream"] }
 optional = true
 version = "2.14.0"
 default-features = false
-features = ["pa_v12_compatibility"]
+features = ["pa_v12"]
 
 [dev-dependencies]
 env_logger = "0.7.1"
