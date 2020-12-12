@@ -438,7 +438,10 @@ where
                                     .as_secs()
                                     .try_into()
                                     .expect("woah that's one large number"),
-                                tv_nsec: delay.subsec_nanos().into(),
+                                tv_nsec: delay
+                                    .subsec_nanos()
+                                    .try_into()
+                                    .expect("woah that's one large number"),
                             },
                             ptr::null_mut(),
                         );
