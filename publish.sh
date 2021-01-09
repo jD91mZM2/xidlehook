@@ -3,12 +3,6 @@
 
 set -e
 
-pandoc -s --toc -t gfm README.org -o README.md
-eval "$VISUAL" README.md
-
-echo "Looks good? Press enter to continue."
-read -r
-
 git reset
 
 do_package() {
