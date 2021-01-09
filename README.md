@@ -4,6 +4,7 @@
         -   [Other installation methods](#other-installation-methods)
     -   [Socket API](#socket-api)
     -   [Caffeinate](#caffeinate)
+    -   [Configuring via `systemd`](#configuring-via-systemd)
     -   [Troubleshooting](#troubleshooting)
 
 # xidlehook
@@ -163,6 +164,33 @@ If you're looking for a more elaborate client to temporarily disable
 `xidlehook`, take a look at
 [caffeinate](https://github.com/rschmukler/caffeinate) which has timers
 and PID based monitoring.
+
+## Configuring via `systemd`
+
+If you use a distribution that uses `systemd` for its init system, you may wish
+to use it to ensure that `xidlehook` is always started when you log in. You can
+do this at the level of an individual user by placing the following service
+file at `$XDG_CONFIG_HOME/systemd/user/xidlehook.service` (typically
+`$HOME/.config/systemd/user/xidlehook.service`):
+
+``` systemd
+[Unit]
+Description=Automatic Screen Locker
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+Environment=XIDLEHOOK_SOCK=%t/xidlehook.socket
+ExecStart=/usr/bin/xidlehook --not-when-audio --not-when-fullscreen --socket $XIDLEHOOK_SOCK --timer 900 '/usr/bin/slock' ''
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The above service file example locks the screen using the `slock` program after
+15 minutes of inactivity, but you can edit it  the `xidlehook` command to do
+anything you wish. We need to thread the `DISPLAY` environment variable down so
+that `xidlehook` knows how to open up a connection to the X server.
 
 ## Troubleshooting
 
