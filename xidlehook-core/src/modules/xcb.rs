@@ -62,7 +62,8 @@ impl Xcb {
                 xcb::xproto::ATOM_ATOM, // type_
                 0,                      // long_offset
                 u32::max_value(),       // long_length
-            ).get_reply()?;
+            )
+            .get_reply()?;
 
             // The safe API can't possibly know what value xcb returned,
             // sadly. Here we are manually transmuting &[c_void] to
@@ -73,7 +74,10 @@ impl Xcb {
                 slice::from_raw_parts(value.as_ptr() as *const xcb::xproto::Atom, value.len())
             };
 
-            if value.iter().any(|atom| *atom == self.atom_net_wm_state_fullscreen) {
+            if value
+                .iter()
+                .any(|atom| *atom == self.atom_net_wm_state_fullscreen)
+            {
                 debug!("Window {} was fullscreen", window);
                 return Ok(true);
             }

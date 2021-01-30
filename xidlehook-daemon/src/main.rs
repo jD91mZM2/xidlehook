@@ -15,10 +15,14 @@
 
 use std::{fs, rc::Rc, time::Duration};
 
-use tokio::{stream::{self, StreamExt}, sync::mpsc, signal::unix::{signal, SignalKind}};
 use log::{trace, warn};
 use nix::sys::wait;
 use structopt::StructOpt;
+use tokio::{
+    signal::unix::{signal, SignalKind},
+    stream::{self, StreamExt},
+    sync::mpsc,
+};
 use xidlehook_core::{
     modules::{StopAt, Xcb},
     Module, Xidlehook,
@@ -127,7 +131,9 @@ async fn main() -> xidlehook_core::Result<()> {
         opt,
         xcb,
         xidlehook,
-    }.main_loop().await
+    }
+    .main_loop()
+    .await
 }
 
 struct App {

@@ -1,12 +1,12 @@
 use std::convert::Infallible;
 
+use log::{trace, warn};
 use tokio::{
     io::{BufReader, BufWriter},
     net::UnixListener,
     prelude::*,
     sync::{mpsc, oneshot},
 };
-use log::{trace, warn};
 
 pub mod handler;
 pub mod models;
@@ -42,7 +42,10 @@ pub async fn main_loop(
                 };
 
                 let (reply_tx, reply_rx) = oneshot::channel();
-                socket_tx.send((msg, reply_tx)).await.expect("receiver closed too early");
+                socket_tx
+                    .send((msg, reply_tx))
+                    .await
+                    .expect("receiver closed too early");
 
                 let reply = match reply_rx.await {
                     Ok(reply) => reply,

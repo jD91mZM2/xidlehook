@@ -1,9 +1,5 @@
 use std::{cell::Cell, time::Duration};
-use xidlehook_core::{
-    timers::CallbackTimer,
-    Action::*,
-    Xidlehook
-};
+use xidlehook_core::{timers::CallbackTimer, Action::*, Xidlehook};
 
 const TEST_UNIT: Duration = Duration::from_millis(50);
 
