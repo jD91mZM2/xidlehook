@@ -62,6 +62,8 @@ pub struct Query {
 pub enum Message {
     Add(Add),
     Control(Control),
+    ResetIdle,
+    StopTimers,
     Query(Query),
 }
 

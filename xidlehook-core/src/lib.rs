@@ -158,7 +158,7 @@ where
     }
 
     /// Calls the abortion function on the current timer and stops pursuing the chain
-    fn abort(&mut self) -> Result<()> {
+    pub fn abort(&mut self) -> Result<()> {
         if self.aborted {
             return Ok(());
         }
@@ -172,7 +172,7 @@ where
 
     /// Calls the abortion functions on the current timer and restarts from index zero. Just like
     /// `poll` is continued usage after an error discouraged.
-    fn reset(&mut self) -> Result<()> {
+    pub fn reset(&mut self) -> Result<()> {
         self.abort()?;
 
         if self.next_index > 0 {
@@ -454,7 +454,6 @@ where
                 Action::Quit => break,
             }
 
-
             if callback() {
                 // Oh look, the callback wants us to exit
                 break;
@@ -489,10 +488,9 @@ where
                         use tokio::stream::StreamExt;
                         tokio::stream::pending::<()>().next().await;
                     }
-                }
+                },
                 Action::Quit => break,
             }
-
         }
         Ok(())
     }

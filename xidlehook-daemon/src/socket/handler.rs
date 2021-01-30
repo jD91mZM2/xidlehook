@@ -67,6 +67,14 @@ impl App {
 
                 Ok(Some(Reply::Empty))
             },
+            Message::ResetIdle => {
+                self.xidlehook.reset()?;
+                Ok(Some(Reply::Empty))
+            },
+            Message::StopTimers => {
+                self.xidlehook.abort()?;
+                Ok(Some(Reply::Empty))
+            },
             Message::Query(query) => {
                 let timers = self.xidlehook.timers();
                 let mut output = Vec::new();

@@ -70,6 +70,14 @@ enum Subcommands {
         #[structopt(long, possible_values = &OptAction::variants(), case_insensitive = true)]
         action: OptAction,
     },
+    /// Pretend the user moved the mouse or otherwise became active, reset the idle timer and start
+    /// triggering timers.
+    ResetIdle,
+    /// Disable xidlehook until the user becomes active again. Basically act is if there were no
+    /// more timers left to activate. The xidlehook-client commands that modify timers already use
+    /// this behaviour implicitly to avoid potential glitches that could arise when you modify
+    /// currently running timers.
+    StopTimers,
     /// Query the list of timers
     Query {
         /// The timers which this operation should apply to. Leave
@@ -112,6 +120,8 @@ fn main() -> xidlehook_core::Result<()> {
                 OptAction::Delete => socket::Action::Delete,
             },
         }),
+        Subcommands::ResetIdle => socket::Message::ResetIdle,
+        Subcommands::StopTimers => socket::Message::StopTimers,
         Subcommands::Query { timer } => socket::Message::Query(socket::Query {
             timer: filter(timer),
         }),
