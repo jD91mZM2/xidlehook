@@ -28,9 +28,14 @@
 //! This library lets you create your own xidlehook front-end using a
 //! powerful timer and module system.
 
-use std::{cmp, convert::TryInto, fmt, ptr, time::Duration};
+use std::{
+    cmp,
+    convert::TryInto,
+    fmt, ptr,
+    time::{Duration, Instant},
+};
 
-use log::{trace, warn};
+use log::{info, trace, warn};
 use nix::libc;
 
 /// The default error type for xidlehook. Unfortunately, it's a
@@ -77,6 +82,9 @@ where
 {
     module: M,
 
+    /// Whether to reset on sleep
+    detect_sleep: bool,
+
     timers: Vec<T>,
     next_index: usize,
     /// The base idle time: the absolute idle time when the last timer
@@ -95,6 +103,8 @@ impl<T: Timer> Xidlehook<T, ()> {
         Self {
             module: (),
 
+            detect_sleep: false,
+
             timers,
             next_index: 0,
             base_idle_time: Duration::default(),
@@ -108,6 +118,9 @@ macro_rules! with_module {
     ($self:expr, $module:expr) => {
         Xidlehook {
             module: $module,
+
+            detect_sleep: $self.detect_sleep,
+
             timers: $self.timers,
             next_index: $self.next_index,
             base_idle_time: $self.base_idle_time,
@@ -136,6 +149,22 @@ where
         // intelligent enough to realize the function isn't using that field. This is one of the few
         // shortcomings of Rust IMO.
         with_module!(self, (self.module, other))
+    }
+
+    /// Set whether or not we reset the idle timer once a suspend was detected. This only affects
+    /// main/main_async.
+    pub fn set_detect_sleep(&mut self, value: bool) {
+        self.detect_sleep = value;
+    }
+    /// Get whether or not we reset the idle timer once a suspend was detected
+    pub fn detect_sleep(&self) -> bool {
+        self.detect_sleep
+    }
+    /// Set whether or not we reset the idle timer once a suspend was detected. This only affects
+    /// main/main_async. This is the chainable version of `set_detect_sleep`.
+    pub fn with_detect_sleep(mut self, value: bool) -> Self {
+        self.detect_sleep = value;
+        self
     }
 
     /// Returns an immutable list of all timers
@@ -430,6 +459,8 @@ where
                 Action::Sleep(delay) => {
                     trace!("Sleeping for {:?}", delay);
 
+                    let sleep_start = Instant::now();
+
                     // This sleep, unlike `thread::sleep`, will stop for signals.
                     unsafe {
                         libc::nanosleep(
@@ -445,6 +476,16 @@ where
                             },
                             ptr::null_mut(),
                         );
+                    }
+
+                    if let Some(time_difference) = sleep_start.elapsed().checked_sub(delay) {
+                        if time_difference >= Duration::from_secs(3) && self.detect_sleep {
+                            info!(
+                                "We slept {:?} longer than expected - has the computer been suspended?",
+                                time_difference,
+                            );
+                            self.reset()?;
+                        }
                     }
                 },
                 Action::Forever => {
@@ -471,11 +512,23 @@ where
                 Action::Sleep(delay) => {
                     trace!("Sleeping for {:?}", delay);
 
+                    let sleep_start = Instant::now();
+
                     #[cfg(feature = "async-std")]
                     async_std::task::sleep(delay).await;
                     #[cfg(feature = "tokio")]
                     if cfg!(not(feature = "async-std")) {
                         tokio::time::delay_for(delay).await;
+                    }
+
+                    if let Some(time_difference) = sleep_start.elapsed().checked_sub(delay) {
+                        if time_difference >= Duration::from_secs(3) && self.detect_sleep {
+                            info!(
+                                "We slept {:?} longer than expected - has the computer been suspended?",
+                                time_difference,
+                            );
+                            self.reset()?;
+                        }
                     }
                 },
                 Action::Forever => {

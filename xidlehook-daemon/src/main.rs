@@ -54,6 +54,9 @@ pub struct Opt {
     /// videos.
     #[structopt(long, conflicts_with("print"))]
     pub not_when_fullscreen: bool,
+    /// Detect when the system wakes up from a suspend and reset the idle timer
+    #[structopt(long, conflicts_with("print"))]
+    pub detect_sleep: bool,
 
     /// The duration is the number of seconds of inactivity which
     /// should trigger this timer.
@@ -67,15 +70,15 @@ pub struct Opt {
     #[structopt(long, conflicts_with("print"), required_unless("print"), value_names = &["duration", "command", "canceller"])]
     pub timer: Vec<String>,
 
-    /// Don't invoke the timer when any audio is playing (PulseAudio specific)
-    #[cfg(feature = "pulse")]
-    #[structopt(long, conflicts_with("print"))]
-    pub not_when_audio: bool,
-
     /// Listen to a unix socket at this address for events.
     /// Each event is one line of JSON data.
     #[structopt(long, conflicts_with("print"))]
     pub socket: Option<String>,
+
+    /// Don't invoke the timer when any audio is playing (PulseAudio specific)
+    #[cfg(feature = "pulse")]
+    #[structopt(long, conflicts_with("print"))]
+    pub not_when_audio: bool,
 }
 
 #[tokio::main]
@@ -126,7 +129,9 @@ async fn main() -> xidlehook_core::Result<()> {
         }
     }
 
-    let xidlehook = Xidlehook::new(timers).register(modules);
+    let xidlehook = Xidlehook::new(timers)
+        .register(modules)
+        .with_detect_sleep(opt.detect_sleep);
     App {
         opt,
         xcb,
