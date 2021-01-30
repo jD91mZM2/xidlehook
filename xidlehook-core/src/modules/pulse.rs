@@ -65,7 +65,7 @@ impl NotWhenAudio {
         }
 
         ctx.borrow_mut()
-            .connect(None, context::flags::NOFLAGS, None)
+            .connect(None, context::FlagSet::NOFLAGS, None)
             .map_err(|err| format!("pulseaudio: failed to connect context: {}", err))?;
 
         mainloop.borrow_mut().lock();
