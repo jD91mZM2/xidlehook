@@ -3,10 +3,7 @@
 
   inputs = {
     utils.url = "github:numtide/flake-utils";
-
-    # --- SEE https://github.com/nmattia/naersk/pull/141 ---
-    # naersk.url = "github:nmattia/naersk";
-    naersk.url = "github:jD91mZM2/naersk/flake-ws";
+    naersk.url = "github:nmattia/naersk";
   };
 
   outputs = { self, nixpkgs, utils, naersk }:
@@ -21,8 +18,7 @@
       rec {
         # `nix build`
         packages.xidlehook = naersk-lib.buildPackage {
-          pname = "xidlehook";
-          # TODO: Use workspaces
+          name = "xidlehook";
           src = ./.;
 
           inherit nativeBuildInputs buildInputs;
