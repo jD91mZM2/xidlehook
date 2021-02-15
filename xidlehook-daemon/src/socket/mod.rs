@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, fs};
 
 use log::{trace, warn};
 use tokio::{
@@ -17,6 +17,8 @@ pub async fn main_loop(
     address: &str,
     socket_tx: mpsc::Sender<(Message, oneshot::Sender<Reply>)>,
 ) -> xidlehook_core::Result<Infallible> {
+    let _ = fs::remove_file(address);
+
     let mut listener = UnixListener::bind(address)?;
     trace!("Bound unix listener on address {:?}", address);
 
