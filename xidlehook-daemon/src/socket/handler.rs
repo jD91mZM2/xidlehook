@@ -25,6 +25,7 @@ impl App {
             Message::Control(control) => {
                 let len = self.xidlehook.timers().len();
 
+                // Relies on control.timer being sorted, which it is, because it's a btreeset
                 let mut removed = 0;
                 for id in control.timer.iter(
                     len.try_into()

@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::BTreeSet, time::Duration};
 
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +8,7 @@ pub type TimerId = u16;
 #[serde(untagged)]
 pub enum Filter {
     All,
-    Selected(Vec<TimerId>),
+    Selected(BTreeSet<TimerId>),
     One(TimerId),
 }
 impl Default for Filter {

@@ -91,7 +91,7 @@ fn filter(filter: Vec<socket::TimerId>) -> socket::Filter {
     if filter.is_empty() {
         socket::Filter::All
     } else {
-        socket::Filter::Selected(filter)
+        socket::Filter::Selected(filter.into_iter().collect())
     }
 }
 
