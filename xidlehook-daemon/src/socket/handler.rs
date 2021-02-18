@@ -30,8 +30,7 @@ impl App {
                     len.try_into()
                         .expect("xidlehook does not yet handle this many timers"),
                 ) {
-                    let timers = self.xidlehook.timers_mut()?;
-
+                    let timers = self.xidlehook.timers();
                     let id = match id.checked_sub(removed) {
                         Some(res) => usize::from(res),
                         None => continue,
@@ -42,9 +41,11 @@ impl App {
 
                     match control.action {
                         Action::Disable => {
+                            let timers = self.xidlehook.timers_mut()?;
                             timers[id].set_disabled(true);
                         },
                         Action::Enable => {
+                            let timers = self.xidlehook.timers_mut()?;
                             timers[id].set_disabled(false);
                         },
                         Action::Trigger => {
@@ -55,6 +56,7 @@ impl App {
                             }
                         },
                         Action::Delete => {
+                            let timers = self.xidlehook.timers_mut()?;
                             // TODO: Probably want to use `retain` to optimize this...
                             timers.remove(id);
 

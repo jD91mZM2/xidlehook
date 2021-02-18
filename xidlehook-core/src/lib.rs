@@ -275,6 +275,7 @@ where
 
         let next = &mut self.timers[index];
 
+        // Trigger module pre-timer
         match self.module.pre_timer(timer_info) {
             Ok(_) if force => (),
             Ok(progress) => handle!(progress),
@@ -283,18 +284,34 @@ where
             },
         }
 
+        // Send activation signal to current timer
         next.activate()?;
+
+        // Send deactivation signal to previous timer
         if let Some(previous) = self.previous() {
             previous.deactivate()?;
         }
 
+        // Reset the idle time to zero
         self.base_idle_time = absolute_time;
 
+        // Send module post-timer
         match self.module.post_timer(timer_info) {
             Ok(progress) => handle!(progress),
             Err(err) => {
                 self.module.warning(&err)?;
             },
+        }
+
+        // Next time, continue from next index
+        //
+        // Thanks, clippy, but get_mut will fail far before this is even close to
+        // overflowing
+        #[allow(clippy::integer_arithmetic)]
+        {
+            self.next_index = self
+                .next_enabled(index + 1)
+                .unwrap_or_else(|| self.timers.len());
         }
 
         Ok(Progress::Continue)
@@ -322,6 +339,8 @@ where
             None => return Ok(Action::Forever),
         };
 
+        // We can only ever sleep as long as it takes for the first timer to activate, since the
+        // user may become active (and then idle again) at any point.
         let mut max_sleep = self.timers[first_index]
             .time_left(Duration::default())?
             .unwrap_or_default();
@@ -355,8 +374,7 @@ where
                 trace!("Taking next timer into account. Remaining: {:?}", remaining);
                 max_sleep = cmp::min(max_sleep, remaining);
             } else {
-                // Oh! It's already been activated - let's trigger it.
-
+                // Oh! It has already been passed - let's trigger it.
                 match self.trigger(self.next_index, absolute_time, false)? {
                     Progress::Continue => (),
                     Progress::Abort => return Ok(Action::Sleep(max_sleep)),
@@ -366,23 +384,15 @@ where
 
                 // From now on, `relative_time` is outdated. Don't use it.
 
-                // Thanks, clippy, but get_mut will fail far before this is even close to
-                // overflowing
-                #[allow(clippy::integer_arithmetic)]
-                {
-                    self.next_index = self
-                        .next_enabled(self.next_index + 1)
-                        .unwrap_or_else(|| self.timers.len());
-                }
-
                 if let Some(next) = self.timers.get_mut(self.next_index) {
                     assert!(!next.disabled());
                     if let Some(remaining) = next.time_left(Duration::default())? {
+                        // We can't sleep longer than it will take for the next timer to trigger
+                        max_sleep = cmp::min(max_sleep, remaining);
                         trace!(
                             "Taking next-next timer into account. Remaining: {:?}",
                             remaining
                         );
-                        max_sleep = cmp::min(max_sleep, remaining);
                     }
                 }
             }
