@@ -204,8 +204,8 @@ where
     }
 
     /// Calls the abortion functions on the current timer and restarts from index zero. Just like
-    /// `poll` is continued usage after an error discouraged.
-    pub fn reset(&mut self) -> Result<()> {
+    /// with the `poll` function, continued usage after an error discouraged.
+    pub fn reset(&mut self, absolute_time: Duration) -> Result<()> {
         self.abort()?;
 
         trace!("Resetting");
@@ -217,8 +217,8 @@ where
             self.next_index = 0;
         }
 
-        self.base_idle_time = Duration::default();
-        self.previous_idle_time = Duration::default();
+        self.base_idle_time = absolute_time;
+        self.previous_idle_time = absolute_time;
         self.aborted = false;
 
         Ok(())
@@ -253,7 +253,7 @@ where
                     },
                     Progress::Reset => {
                         trace!("Module requested reset of chain.");
-                        self.reset()?;
+                        self.reset(absolute_time)?;
                         return Ok(Progress::Reset);
                     },
                     Progress::Stop => return Ok(Progress::Stop),
@@ -310,7 +310,7 @@ where
         if absolute_time < self.previous_idle_time {
             // If the idle time has decreased, the only reasonable explanation is that the user
             // briefly wasn't idle.
-            self.reset()?;
+            self.reset(absolute_time)?;
         }
 
         self.previous_idle_time = absolute_time;
@@ -497,7 +497,7 @@ where
                                 "We slept {:?} longer than expected - has the computer been suspended?",
                                 time_difference,
                             );
-                            self.reset()?;
+                            self.reset(xcb.get_idle()?)?;
                         }
                     }
                 },
@@ -540,7 +540,7 @@ where
                                 "We slept {:?} longer than expected - has the computer been suspended?",
                                 time_difference,
                             );
-                            self.reset()?;
+                            self.reset(xcb.get_idle()?)?;
                         }
                     }
                 },

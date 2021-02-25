@@ -71,7 +71,7 @@ impl App {
                 Ok(Some(Reply::Empty))
             },
             Message::ResetIdle => {
-                self.xidlehook.reset()?;
+                self.xidlehook.reset(self.xcb.get_idle()?)?;
                 Ok(Some(Reply::Empty))
             },
             Message::StopTimers => {
