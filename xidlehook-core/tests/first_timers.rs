@@ -29,6 +29,7 @@ fn first_timer_test() {
 
     // Trigger all timers up to the last one. The sleep is always limited to 10 because the first
     // enabled timer can be accessed at any time and thus 10 sleep is the minimum.
+    assert_eq!(timer.poll(TEST_UNIT * 000).unwrap(), Sleep(TEST_UNIT * 010));
     assert_eq!(timer.poll(TEST_UNIT * 010).unwrap(), Sleep(TEST_UNIT * 010));
     assert_eq!(timer.poll(TEST_UNIT * 060).unwrap(), Sleep(TEST_UNIT * 010));
     assert_eq!(timer.poll(TEST_UNIT * 260).unwrap(), Sleep(TEST_UNIT * 010));
