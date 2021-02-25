@@ -1,7 +1,10 @@
 //! The timer trait and some useful implementations
 
 use crate::Result;
-use std::{process::Command, time::Duration};
+use std::{
+    process::{Child, Command},
+    time::Duration,
+};
 
 /// The timer trait is used to tell xidlehook after how much idle time
 /// your timer should activate (relatively), and what activation
@@ -11,10 +14,9 @@ use std::{process::Command, time::Duration};
 pub trait Timer {
     /// Return the time left based on the relative idle time
     fn time_left(&mut self, idle_time: Duration) -> Result<Option<Duration>>;
-    /// How urgent this timer wants to be notified on abort (when the
-    /// user is no longer idle). Return as slow of a duration as you
-    /// think is acceptable to be nice to the CPU - preferrably return
-    /// `None` which basically means infinity.
+    /// How urgent this timer wants to be notified on abort (when the user is no longer idle).
+    /// Return as slow of a duration as you think is acceptable to be nice to the CPU - preferrably
+    /// return `None` which basically means infinity.
     fn abort_urgency(&self) -> Option<Duration> {
         None
     }
@@ -32,10 +34,9 @@ pub trait Timer {
     fn deactivate(&mut self) -> Result<()> {
         Ok(())
     }
-    /// Return true if the timer is disabled and should be
-    /// skipped. This function is called immediately after the
-    /// previous timer is triggered, so any changes since then aren't
-    /// reflected.
+    /// Return true if the timer is disabled and should be skipped. Changes to this value are
+    /// reflected - you may enable a timer that was previously disabled, and xidlehook will call it
+    /// as soon as the timer is passed - or immediately if the timer has already passed.
     fn disabled(&mut self) -> bool {
         false
     }
@@ -55,6 +56,9 @@ pub struct CmdTimer {
     pub deactivation: Option<Command>,
     /// Whether or not to disable this timer
     pub disabled: bool,
+
+    /// The child process that is currently running
+    pub activation_child: Option<Child>,
 }
 impl Timer for CmdTimer {
     fn time_left(&mut self, idle_time: Duration) -> Result<Option<Duration>> {
@@ -70,7 +74,7 @@ impl Timer for CmdTimer {
 
     fn activate(&mut self) -> Result<()> {
         if let Some(ref mut activation) = self.activation {
-            activation.spawn()?;
+            self.activation_child = Some(activation.spawn()?);
         }
         Ok(())
     }
@@ -87,7 +91,13 @@ impl Timer for CmdTimer {
         Ok(())
     }
     fn disabled(&mut self) -> bool {
-        self.disabled
+        if let Some(Ok(None)) = self.activation_child.as_mut().map(|child| child.try_wait()) {
+            // We temporarily disable this timer while the child is still running
+            true
+        } else {
+            // Whether or not this command is disabled
+            self.disabled
+        }
     }
 }
 

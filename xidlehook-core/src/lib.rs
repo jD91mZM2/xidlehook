@@ -19,6 +19,10 @@
 #![allow(
     // I don't agree with this lint
     clippy::must_use_candidate,
+
+    // The integer arithmetic here is mostly regarding indexes into Vecs, indexes where memory
+    // allocation will fail far, far earlier than the arithmetic will fail.
+    clippy::integer_arithmetic,
 )]
 
 //! Instead of implementing your extension as something that
@@ -204,6 +208,8 @@ where
     pub fn reset(&mut self) -> Result<()> {
         self.abort()?;
 
+        trace!("Resetting");
+
         if self.next_index > 0 {
             if let Err(err) = self.module.reset() {
                 self.module.warning(&err)?;
@@ -216,18 +222,6 @@ where
         self.aborted = false;
 
         Ok(())
-    }
-
-    fn next_enabled(&'_ mut self, mut index: usize) -> Option<usize> {
-        while self.timers.get_mut(index)?.disabled() {
-            trace!("Timer {} was disabled, going to next...", index);
-            // Thanks, clippy, but get_mut will fail far before this is even close to overflowing
-            #[allow(clippy::integer_arithmetic)]
-            {
-                index += 1;
-            }
-        }
-        Some(index)
     }
 
     /// Skip ahead to the selected timer. Timers leading up to this point will not be ran. If you
@@ -304,15 +298,7 @@ where
         }
 
         // Next time, continue from next index
-        //
-        // Thanks, clippy, but get_mut will fail far before this is even close to
-        // overflowing
-        #[allow(clippy::integer_arithmetic)]
-        {
-            self.next_index = self
-                .next_enabled(index + 1)
-                .unwrap_or_else(|| self.timers.len());
-        }
+        self.next_index = index + 1;
 
         Ok(Progress::Continue)
     }
@@ -329,25 +315,42 @@ where
 
         self.previous_idle_time = absolute_time;
 
-        let first_index = match self.next_enabled(0) {
-            Some(index) => index,
-
-            // There are no enabled timers... As requested by user @desbma on GitHub, it makes most
-            // sense to leave xidlehook doing nothing, as it can still be activated using other
-            // means such as the socket API. See the message:
-            // https://github.com/jD91mZM2/xidlehook/issues/35#issuecomment-579495447
-            None => return Ok(Action::Forever),
-        };
-
         // We can only ever sleep as long as it takes for the first timer to activate, since the
         // user may become active (and then idle again) at any point.
-        let mut max_sleep = self.timers[first_index]
-            .time_left(Duration::default())?
-            .unwrap_or_default();
-        trace!(
-            "Taking the first timer into account. Remaining: {:?}",
-            max_sleep
-        );
+        let mut max_sleep = Duration::from_nanos(u64::MAX);
+
+        let mut first_timer = 0;
+
+        while let Some(timer) = self.timers.get_mut(first_timer) {
+            if !timer.disabled() {
+                break;
+            }
+
+            // This timer may re-activate in the future and take presedence over the timer we
+            // thought was the next enabled timer.
+            if let Some(remaining) = timer.time_left(Duration::from_nanos(0))? {
+                trace!(
+                    "Taking disabled first timer into account. Remaining: {:?}",
+                    remaining
+                );
+                max_sleep = cmp::min(max_sleep, remaining);
+            }
+
+            first_timer += 1;
+        }
+
+        if let Some(timer) = self.timers.get_mut(first_timer) {
+            if let Some(remaining) = timer.time_left(Duration::from_nanos(0))? {
+                trace!(
+                    "Taking first timer into account. Remaining: {:?}",
+                    remaining
+                );
+                max_sleep = cmp::min(max_sleep, remaining)
+            }
+        } else {
+            // No timer was enabled!
+            return Ok(Action::Forever);
+        }
 
         if self.aborted {
             trace!("This chain was aborted, I won't pursue it");
@@ -357,44 +360,44 @@ where
         let relative_time = absolute_time - self.base_idle_time;
         trace!("Relative time: {:?}", relative_time);
 
-        if self.next_index == 0 {
-            // Normally the check for whether a timer is disabled or not is done when calculating
-            // the time until the next timer should pop. But in the case of the first timer being
-            // disabled, well, there's no previous timer to have done this check. So let's skip
-            // ahead.
-            //
-            // Note: We don't need to worry about what could happen if a timer is disabled midway,
-            // see the docs for `disabled` - it's expected to ignore these changes.
-            self.next_index = first_index;
+        let mut next_index = self.next_index;
+
+        while let Some(timer) = self.timers.get_mut(next_index) {
+            if !timer.disabled() {
+                break;
+            }
+
+            // This timer may re-activate in the future and take presedence over the timer we
+            // thought was the next enabled timer.
+            if let Some(remaining) = timer.time_left(relative_time)? {
+                trace!(
+                    "Taking disabled timer into account. Remaining: {:?}",
+                    remaining
+                );
+                max_sleep = cmp::min(max_sleep, remaining);
+            }
+
+            next_index += 1;
         }
 
         // When there's a next timer available, get the time until that activates
-        if let Some(next) = self.timers.get_mut(self.next_index) {
+        if let Some(next) = self.timers.get_mut(next_index) {
             if let Some(remaining) = next.time_left(relative_time)? {
-                trace!("Taking next timer into account. Remaining: {:?}", remaining);
+                trace!(
+                    "Taking next enabled timer into account. Remaining: {:?}",
+                    remaining
+                );
                 max_sleep = cmp::min(max_sleep, remaining);
             } else {
+                trace!("Triggering timer #{}", next_index);
                 // Oh! It has already been passed - let's trigger it.
-                match self.trigger(self.next_index, absolute_time, false)? {
-                    Progress::Continue => (),
-                    Progress::Abort => return Ok(Action::Sleep(max_sleep)),
-                    Progress::Reset => return Ok(Action::Sleep(max_sleep)),
+                match self.trigger(next_index, absolute_time, false)? {
                     Progress::Stop => return Ok(Action::Quit),
+                    _ => (),
                 }
 
-                // From now on, `relative_time` is outdated. Don't use it.
-
-                if let Some(next) = self.timers.get_mut(self.next_index) {
-                    assert!(!next.disabled());
-                    if let Some(remaining) = next.time_left(Duration::default())? {
-                        // We can't sleep longer than it will take for the next timer to trigger
-                        max_sleep = cmp::min(max_sleep, remaining);
-                        trace!(
-                            "Taking next-next timer into account. Remaining: {:?}",
-                            remaining
-                        );
-                    }
-                }
+                // Recurse to find return value
+                return self.poll(absolute_time);
             }
         }
 

@@ -1,7 +1,6 @@
-#!/bin/sh
-# -*- eval: (aggressive-indent-mode -1); -*-
+#!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
 alias woot='cargo run --bin xidlehook-client -- --socket "/tmp/xidlehook-test.sock"'
 

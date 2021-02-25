@@ -1,9 +1,9 @@
-#!/bin/sh
-# -*- eval: (aggressive-indent-mode -1); -*-
+#!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
 cargo run -- \
+    --timer 1 "echo start sleep; sleep 5; echo end sleep" "" \
     --timer 2 "echo 2" "" \
     --timer 1 "echo 3" "" \
     --timer 1 "echo 4" "" \

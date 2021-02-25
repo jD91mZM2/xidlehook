@@ -34,7 +34,7 @@
         # `nix develop`
         devShell = pkgs.mkShell {
           buildInputs = buildInputs;
-          nativeBuildInputs = nativeBuildInputs ++ [ pkgs.rustc pkgs.cargo ];
+          nativeBuildInputs = nativeBuildInputs ++ (with pkgs; [ rustc cargo gnome3.zenity ]);
         };
       });
 }
