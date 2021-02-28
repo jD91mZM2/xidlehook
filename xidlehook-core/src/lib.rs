@@ -309,8 +309,9 @@ where
     pub fn poll(&mut self, absolute_time: Duration) -> Result<Action> {
         if absolute_time < self.previous_idle_time {
             // If the idle time has decreased, the only reasonable explanation is that the user
-            // briefly wasn't idle.
-            self.reset(absolute_time)?;
+            // briefly wasn't idle. We reset the base idle time to zero so the entire idle duration
+            // is counted.
+            self.reset(Duration::from_millis(0))?;
         }
 
         self.previous_idle_time = absolute_time;
