@@ -4,7 +4,7 @@ description = "xidlehook core library"
 edition = "2018"
 license = "MIT"
 name = "xidlehook-core"
-version = "0.2.0"
+version = "0.3.0"
 
 repository = "https://gitlab.com/jD91mZM2/xidlehook"
 readme = "README.md"

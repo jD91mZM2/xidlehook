@@ -1,5 +1,4 @@
-#!/usr/bin/env nix-shell
-#!nix-shell -p pandoc -i sh
+#!/usr/bin/env bash
 
 set -e
 
@@ -43,12 +42,6 @@ echo "Now updating root lock file"
 rm Cargo.lock
 cargo check
 git add Cargo.lock
-git commit --amend --no-edit
-
-echo "Trying nix build"
-cargo2nix generate
-nix-build .
-git add Cargo.nix
 git commit --amend --no-edit
 
 echo "Now make a tag! Yay!"
