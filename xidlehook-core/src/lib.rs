@@ -411,7 +411,7 @@ where
             }
         }
 
-        if max_sleep == Duration::from_secs(u64::MAX) {
+        if max_sleep == Duration::from_nanos(u64::MAX) {
             Ok(Action::Forever)
         } else {
             Ok(Action::Sleep(max_sleep))

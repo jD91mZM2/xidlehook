@@ -5,6 +5,8 @@ const TEST_UNIT: Duration = Duration::from_millis(50);
 
 #[test]
 fn disabled_timers_test() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let triggered = Cell::new(0);
 
     let mut timer = Xidlehook::new(vec![
@@ -53,9 +55,10 @@ fn disabled_timers_test() {
     timer.timers_mut().unwrap()[3].disabled = true;
     triggered.set(0);
 
-    // Make sure xidlehook doesn't panic
-    assert_eq!(timer.poll(TEST_UNIT * 00).unwrap(), Forever);
-    assert_eq!(timer.poll(TEST_UNIT * 100_000).unwrap(), Forever);
+    // Since disabled timers could activate at any time, the first disabled timer with lowest sleep
+    // time is used.
+    assert_eq!(timer.poll(TEST_UNIT * 00).unwrap(), Sleep(TEST_UNIT * 04));
+    assert_eq!(timer.poll(TEST_UNIT * 100_000).unwrap(), Sleep(TEST_UNIT * 04));
     assert_eq!(triggered.get(), 0b0000);
 
     // ... and make sure re-enabling is fine

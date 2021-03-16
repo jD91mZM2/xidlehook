@@ -5,6 +5,8 @@ const TEST_UNIT: Duration = Duration::from_millis(50);
 
 #[test]
 fn general_timer_test() {
+    let _ = env_logger::builder().is_test(true).try_init();
+
     let triggered = Cell::new(0);
 
     let mut timer = Xidlehook::new(vec![
