@@ -107,8 +107,8 @@ impl CmdTimer {
     }
 }
 impl Timer for CmdTimer {
-    fn time_left(&mut self, idle_time: Duration) -> Result<Option<Duration>> {
-        self.inner.time_left(idle_time)
+    fn duration(&self) -> Duration {
+        self.inner.duration()
     }
     fn abort_urgency(&self) -> Option<Duration> {
         self.inner.abort_urgency()
