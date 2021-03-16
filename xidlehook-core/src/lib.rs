@@ -348,9 +348,6 @@ where
                 );
                 max_sleep = cmp::min(max_sleep, remaining)
             }
-        } else {
-            // No timer was enabled!
-            return Ok(Action::Forever);
         }
 
         if self.aborted {
@@ -414,7 +411,11 @@ where
             }
         }
 
-        Ok(Action::Sleep(max_sleep))
+        if max_sleep == Duration::from_secs(u64::MAX) {
+            Ok(Action::Forever)
+        } else {
+            Ok(Action::Sleep(max_sleep))
+        }
     }
 
     /// Runs a standard poll-sleep-repeat loop.

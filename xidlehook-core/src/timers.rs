@@ -74,7 +74,17 @@ impl Timer for CmdTimer {
 
     fn activate(&mut self) -> Result<()> {
         if let Some(ref mut activation) = self.activation {
-            self.activation_child = Some(activation.spawn()?);
+            let child = activation.spawn()?;
+            let pid = child.id().to_string();
+
+            if let Some(ref mut abortion) = self.abortion {
+                abortion.env("XIDLEHOOK_PID", &pid);
+            }
+            if let Some(ref mut deactivation) = self.deactivation {
+                deactivation.env("XIDLEHOOK_PID", &pid);
+            }
+
+            self.activation_child = Some(child);
         }
         Ok(())
     }
