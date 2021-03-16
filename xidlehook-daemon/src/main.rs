@@ -20,7 +20,6 @@ use nix::sys::wait;
 use structopt::StructOpt;
 use tokio::{
     signal::unix::{signal, SignalKind},
-    stream::{self, StreamExt},
     sync::mpsc,
 };
 use xidlehook_core::{
@@ -81,7 +80,7 @@ pub struct Opt {
     pub not_when_audio: bool,
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> xidlehook_core::Result<()> {
     env_logger::init();
 
@@ -98,7 +97,7 @@ async fn main() -> xidlehook_core::Result<()> {
     let mut timers = Vec::new();
     let mut iter = opt.timer.iter().peekable();
     while iter.peek().is_some() {
-        // clap-rs will ensure there are always a multiple of 3
+        // clap-rs will ensure there are always a multiple of 3 arguments
         let duration: u64 = match iter.next().unwrap().parse() {
             Ok(duration) => duration,
             Err(err) => {
@@ -176,8 +175,7 @@ impl App {
                 if let Some(ref mut rx) = socket_rx {
                     rx.recv().await
                 } else {
-                    // TODO: use future::pending() when released
-                    stream::pending::<()>().next().await;
+                    std::future::pending::<()>().await;
                     unreachable!();
                 }
             };

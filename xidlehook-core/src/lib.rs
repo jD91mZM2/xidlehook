@@ -532,7 +532,7 @@ where
                     async_std::task::sleep(delay).await;
                     #[cfg(feature = "tokio")]
                     if cfg!(not(feature = "async-std")) {
-                        tokio::time::delay_for(delay).await;
+                        tokio::time::sleep(delay).await;
                     }
 
                     if let Some(time_difference) = sleep_start.elapsed().checked_sub(delay) {
@@ -552,8 +552,7 @@ where
                     async_std::future::pending::<()>().await;
                     #[cfg(feature = "tokio")]
                     if cfg!(not(feature = "async-std")) {
-                        use tokio::stream::StreamExt;
-                        tokio::stream::pending::<()>().next().await;
+                        std::future::pending::<()>().await;
                     }
                 },
                 Action::Quit => break,

@@ -2,9 +2,8 @@ use std::{convert::Infallible, fs};
 
 use log::{trace, warn};
 use tokio::{
-    io::{BufReader, BufWriter},
+    io::{BufReader, BufWriter, AsyncWriteExt, AsyncBufReadExt},
     net::UnixListener,
-    prelude::*,
     sync::{mpsc, oneshot},
 };
 
@@ -19,14 +18,14 @@ pub async fn main_loop(
 ) -> xidlehook_core::Result<Infallible> {
     let _ = fs::remove_file(address);
 
-    let mut listener = UnixListener::bind(address)?;
+    let listener = UnixListener::bind(address)?;
     trace!("Bound unix listener on address {:?}", address);
 
     loop {
         let (mut stream, addr) = listener.accept().await?;
         trace!("Connection from {:?}", addr);
 
-        let mut socket_tx = socket_tx.clone();
+        let socket_tx = socket_tx.clone();
         tokio::spawn(async move {
             let (reader, writer) = stream.split();
             let reader = BufReader::new(reader);
