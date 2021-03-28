@@ -12,8 +12,10 @@ use std::{
 /// what happens when the next timer is activated, and also to disable
 /// the timer.
 pub trait Timer {
-    /// Return the time left based on the relative idle time
-    fn time_left(&mut self, idle_time: Duration) -> Result<Option<Duration>>;
+    /// Return how fast the timer activates. Changes to this value may not be reflected - don't
+    /// treat it as anything other than a constant.
+    fn duration(&self) -> Duration;
+
     /// How urgent this timer wants to be notified on abort (when the user is no longer idle).
     /// Return as slow of a duration as you think is acceptable to be nice to the CPU - preferrably
     /// return `None` which basically means infinity.
@@ -61,11 +63,8 @@ pub struct CmdTimer {
     pub activation_child: Option<Child>,
 }
 impl Timer for CmdTimer {
-    fn time_left(&mut self, idle_time: Duration) -> Result<Option<Duration>> {
-        Ok(self
-            .time
-            .checked_sub(idle_time)
-            .filter(|&dur| dur != Duration::default()))
+    fn duration(&self) -> Duration {
+        self.time
     }
 
     fn abort_urgency(&self) -> Option<Duration> {
@@ -160,11 +159,8 @@ impl<F> Timer for CallbackTimer<F>
 where
     F: FnMut(),
 {
-    fn time_left(&mut self, idle_time: Duration) -> Result<Option<Duration>> {
-        Ok(self
-            .time
-            .checked_sub(idle_time)
-            .filter(|&d| d != Duration::default()))
+    fn duration(&self) -> Duration {
+        self.time
     }
     fn activate(&mut self) -> Result<()> {
         (self.f)();

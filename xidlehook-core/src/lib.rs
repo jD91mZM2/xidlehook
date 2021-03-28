@@ -320,33 +320,30 @@ where
         // user may become active (and then idle again) at any point.
         let mut max_sleep = Duration::from_nanos(u64::MAX);
 
-        let mut first_timer = 0;
+        let relative_time = absolute_time - self.base_idle_time;
+        trace!("Relative time: {:?}", relative_time);
 
-        while let Some(timer) = self.timers.get_mut(first_timer) {
-            if !timer.disabled() {
-                break;
-            }
+        // Find lowest time for any remaining timer. The reason behind this horribly pessimistic
+        // sleeping is that timers can be enabled/disabled at any point and users could be active
+        // at any point and the only thing we can be sure of is that timers won't be activated
+        // faster than the timer with lowest duration.
+        //
+        // xidlehook used to be a lot better than this, but unfortunately all the flexibility is
+        // killing it. I'm sorry.
+        for (i, timer) in self.timers.iter().enumerate() {
+            let duration = timer.duration();
+            // TODO: use saturating_sub
+            let remaining = duration.checked_sub(relative_time).unwrap_or(Duration::from_nanos(0));
 
-            // This timer may re-activate in the future and take presedence over the timer we
-            // thought was the next enabled timer.
-            if let Some(remaining) = timer.time_left(Duration::from_nanos(0))? {
-                trace!(
-                    "Taking disabled first timer into account. Remaining: {:?}",
-                    remaining
-                );
+            if remaining > Duration::from_nanos(0) {
+                // Timer has not activated yet and could be activated in the future.
+                trace!("Timer #{} has {:?} remaining", i, remaining);
                 max_sleep = cmp::min(max_sleep, remaining);
-            }
-
-            first_timer += 1;
-        }
-
-        if let Some(timer) = self.timers.get_mut(first_timer) {
-            if let Some(remaining) = timer.time_left(Duration::from_nanos(0))? {
-                trace!(
-                    "Taking first timer into account. Remaining: {:?}",
-                    remaining
-                );
-                max_sleep = cmp::min(max_sleep, remaining)
+            } else {
+                trace!("Timer #{} could be re-triggered by non-idle user {:?}", i, duration);
+                // Timer has already activated but the user may be idle again and it might
+                // activate.
+                max_sleep = cmp::min(max_sleep, duration);
             }
         }
 
@@ -355,48 +352,29 @@ where
             return Ok(Action::Sleep(max_sleep));
         }
 
-        let relative_time = absolute_time - self.base_idle_time;
-        trace!("Relative time: {:?}", relative_time);
-
         let mut next_index = self.next_index;
 
-        while let Some(timer) = self.timers.get_mut(next_index) {
-            if !timer.disabled() {
-                break;
-            }
-
-            // This timer may re-activate in the future and take presedence over the timer we
-            // thought was the next enabled timer.
-            if let Some(remaining) = timer.time_left(relative_time)? {
-                trace!(
-                    "Taking disabled timer into account. Remaining: {:?}",
-                    remaining
-                );
-                max_sleep = cmp::min(max_sleep, remaining);
-            }
-
+        // Skip through all disabled timers
+        while self.timers.get_mut(next_index).map_or(false, |t| t.disabled()) {
             next_index += 1;
         }
 
-        // When there's a next timer available, get the time until that activates
-        if let Some(next) = self.timers.get_mut(next_index) {
-            if let Some(remaining) = next.time_left(relative_time)? {
-                trace!(
-                    "Taking next enabled timer into account. Remaining: {:?}",
-                    remaining
-                );
-                max_sleep = cmp::min(max_sleep, remaining);
-            } else {
-                trace!("Triggering timer #{}", next_index);
-                // Oh! It has already been passed - let's trigger it.
-                match self.trigger(next_index, absolute_time, false)? {
-                    Progress::Stop => return Ok(Action::Quit),
-                    _ => (),
-                }
+        // If a timer has passed, trigger it
+        if self.timers.get_mut(next_index).map_or(false, |t| {
+            // TODO: use saturating_sub
+            let remaining = t.duration().checked_sub(relative_time).unwrap_or(Duration::from_nanos(0));
 
-                // Recurse to find return value
-                return self.poll(absolute_time);
+            remaining == Duration::from_nanos(0)
+        }) {
+            match self.trigger(next_index, absolute_time, false)? {
+                Progress::Stop => return Ok(Action::Quit),
+                _ => (),
             }
+
+            // Recurse to find true return value. The return value of poll is too outdated to
+            // recalculate it without recursive. In theory it should only recurse once, unless the
+            // user has something strange like 0-duration timers.
+            return self.poll(absolute_time);
         }
 
         // When there's a previous timer, respect that timer's abort urgency (see
