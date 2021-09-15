@@ -10,6 +10,7 @@ use std::{fmt, rc::Rc, slice, time::Duration};
 
 use log::debug;
 
+const WM_STATE: &str = "WM_STATE";
 const NET_WM_STATE: &str = "_NET_WM_STATE";
 const NET_WM_STATE_FULLSCREEN: &str = "_NET_WM_STATE_FULLSCREEN";
 
@@ -17,6 +18,9 @@ const NET_WM_STATE_FULLSCREEN: &str = "_NET_WM_STATE_FULLSCREEN";
 pub struct Xcb {
     conn: xcb::Connection,
     root_window: xcb::Window,
+    // Aside from being a property, WM_STATE is also a
+    // type that is not present in the xcb bindings.
+    type_wm_state: u32,
     atom_net_wm_state: xcb::Atom,
     atom_net_wm_state_fullscreen: xcb::Atom,
 }
@@ -29,9 +33,14 @@ impl Xcb {
         let screen = setup.roots().next().ok_or("no xcb root")?;
         let root_window = screen.root();
 
+        let type_wm_state = xcb::xproto::intern_atom(&conn, false, WM_STATE)
+            .get_reply()?
+            .atom();
+
         let atom_net_wm_state = xcb::xproto::intern_atom(&conn, false, NET_WM_STATE)
             .get_reply()?
             .atom();
+
         let atom_net_wm_state_fullscreen =
             xcb::xproto::intern_atom(&conn, false, NET_WM_STATE_FULLSCREEN)
                 .get_reply()?
@@ -40,6 +49,7 @@ impl Xcb {
         Ok(Self {
             conn,
             root_window,
+            type_wm_state,
             atom_net_wm_state,
             atom_net_wm_state_fullscreen,
         })
@@ -54,7 +64,7 @@ impl Xcb {
         let windows = xcb::xproto::query_tree(&self.conn, root).get_reply()?;
 
         for &window in windows.children() {
-            let prop = xcb::xproto::get_property(
+            let prop_net_wm_state = xcb::xproto::get_property(
                 &self.conn,             // c
                 false,                  // delete
                 window,                 // window
@@ -65,18 +75,45 @@ impl Xcb {
             )
             .get_reply()?;
 
+            let prop_wm_state = xcb::xproto::get_property(
+                &self.conn,
+                false,
+                window,
+                self.type_wm_state,
+                xcb::xproto::ATOM_ANY,
+                0,
+                u32::max_value(),
+            )
+            .get_reply()?;
+
             // The safe API can't possibly know what value xcb returned,
             // sadly. Here we are manually transmuting &[c_void] to
             // &[Atom], as we specified we want an atom.
-            let value = prop.value();
-
-            let value = unsafe {
-                slice::from_raw_parts(value.as_ptr() as *const xcb::xproto::Atom, value.len())
+            let value_net_wm_state = prop_net_wm_state.value();
+            let value_net_wm_state = unsafe {
+                slice::from_raw_parts(
+                    value_net_wm_state.as_ptr() as *const xcb::xproto::Atom,
+                    value_net_wm_state.len()
+                )
             };
 
-            if value
+            let value_wm_state = prop_wm_state.value();
+            let value_wm_state = unsafe {
+                slice::from_raw_parts(
+                    value_wm_state.as_ptr() as *const u32,
+                    value_wm_state.len()
+                )
+            };
+
+            // Window must have _NET_WM_STATE_FULLSCREEN property to
+            // be considered as fullscreen AND it must not be Withdrawn.
+            if value_net_wm_state
                 .iter()
-                .any(|atom| *atom == self.atom_net_wm_state_fullscreen)
+                .any(|&atom| atom == self.atom_net_wm_state_fullscreen)
+            && value_wm_state
+                .first()
+                .map(|&state| state != 0) // 0 is WithdrawnState
+                .unwrap_or(false)
             {
                 debug!("Window {} was fullscreen", window);
                 return Ok(true);
